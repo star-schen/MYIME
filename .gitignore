@@ -1,0 +1,10 @@
+/.tools/
+/.deps/
+/build/
+/target/
+/runtime/
+/out/
+/.vs/
+/CMakeUserPresets.json
+*.user
+*.log

@@ -1,0 +1,18 @@
+{
+  "cmake": {
+    "version": "4.4.3",
+    "url": "https://github.com/Kitware/CMake/releases/download/v4.4.3/cmake-4.4.3-windows-x86_64.zip",
+    "sha256": "4D52EBAB7193A698651639ED80D8D04FD903358843572CF44C7FD234CB7C26AB"
+  },
+  "librime": {
+    "version": "1.17.0",
+    "url": "https://github.com/rime/librime/releases/download/1.17.0/rime-33e7814-Windows-msvc-x64.7z",
+    "sha256": "7478C7CAA4FF6B37DE86DABA1F7CE4A994A4F5BA24872A820FB2B3A9B01FED15"
+  },
+  "data": [
+    { "repo": "rime-prelude", "commit": "082425ea0684bca36474415d4a0e8db9b016487e" },
+    { "repo": "rime-pinyin-simp", "commit": "0c6861ef7420ee780270ca6d993d18d4101049d0" },
+    { "repo": "rime-stroke", "commit": "1e8fff9b9494ddec23b0cbc526bcfd8171a6fd48" },
+    { "repo": "rime-essay", "commit": "e2652ea18609a879eae3e87db5d25b7fbc1a4f93" }
+  ]
+}

@@ -1,0 +1,11 @@
+[package]
+name = "myime-core"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+toml = "0.8"
