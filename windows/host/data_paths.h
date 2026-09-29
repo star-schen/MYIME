@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <shlobj.h>
+#include <knownfolders.h>
 #include <userenv.h>
 #include <sddl.h>
 #include <filesystem>
