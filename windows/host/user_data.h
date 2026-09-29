@@ -1,13 +1,21 @@
 #pragma once
 #include <windows.h>
 #include <filesystem>
-#include <mutex>
 #include <stdexcept>
 // Share one lease across all TSF threads in this process. Each other process
 // gets a different persistent slot, avoiding concurrent LevelDB opens.
 class UserDataLease {
+    class ExclusiveLock {
+        SRWLOCK& lock_;
+    public:
+        explicit ExclusiveLock(SRWLOCK& lock) noexcept : lock_(lock) { AcquireSRWLockExclusive(&lock_); }
+        ~ExclusiveLock() { ReleaseSRWLockExclusive(&lock_); }
+        ExclusiveLock(const ExclusiveLock&) = delete;
+        ExclusiveLock& operator=(const ExclusiveLock&) = delete;
+    };
     struct Shared {
-        std::mutex mutex;
+        // Do not depend on a host application's possibly older MSVCP mutex ABI.
+        SRWLOCK mutex=SRWLOCK_INIT;
         HANDLE file=INVALID_HANDLE_VALUE;
         size_t users=0;
         std::filesystem::path path;
@@ -15,9 +23,12 @@ class UserDataLease {
     static Shared& shared() { static Shared value; return value; }
     bool acquired_=false;
 public:
+    UserDataLease() = default;
+    UserDataLease(const UserDataLease&) = delete;
+    UserDataLease& operator=(const UserDataLease&) = delete;
     ~UserDataLease() { release(); }
     std::filesystem::path acquire(const std::filesystem::path& root) {
-        auto& state=shared(); std::lock_guard guard(state.mutex);
+        auto& state=shared(); ExclusiveLock guard(state.mutex);
         if (acquired_) return state.path;
         if (!state.users) {
             for (unsigned i=0;i<256;++i) {
@@ -30,11 +41,12 @@ public:
             }
             if (state.file==INVALID_HANDLE_VALUE) throw std::runtime_error("No free Rime user directory slot");
         }
-        ++state.users; acquired_=true; return state.path;
+        auto result=state.path; // Allocate before taking ownership of a reference.
+        ++state.users; acquired_=true; return result;
     }
     void release() {
         if (!acquired_) return;
-        auto& state=shared(); std::lock_guard guard(state.mutex);
+        auto& state=shared(); ExclusiveLock guard(state.mutex);
         acquired_=false;
         if (--state.users==0) { CloseHandle(state.file); state.file=INVALID_HANDLE_VALUE; state.path.clear(); }
     }

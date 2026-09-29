@@ -5,6 +5,7 @@
 #include "ids.h"
 #include "engine.h"
 #include "candidate_window.h"
+#include "diagnostics.h"
 using Microsoft::WRL::ComPtr;
 class WindowsInputAdapter final : public ITfTextInputProcessorEx, public ITfKeyEventSink,
     public ITfTextEditSink, public ITfThreadMgrEventSink, public ITfTextLayoutSink {
@@ -44,6 +45,9 @@ private:
     CandidateWindow window_;
     std::array<bool,256> forwarded_{};
     bool faulted_=false;
+    bool key_sink_advised_=false;
+    Diagnostics diagnostics_;
+    void log_failure(const char* message);
     unsigned long long generation_=0;
     bool eligible(ITfContext*,WPARAM);
     void switch_context(ITfContext*);

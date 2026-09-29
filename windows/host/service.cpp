@@ -21,11 +21,6 @@ public:
     STDMETHODIMP_(ULONG) Release() override { auto n=InterlockedDecrement(&refs_); if (!n) delete this; return n; }
     STDMETHODIMP OnCompositionTerminated(TfEditCookie,ITfComposition*) override { return S_OK; }
 };
-void log_failure(const char* m) {
-    OutputDebugStringA("MYIME: "); OutputDebugStringA(m); OutputDebugStringA("\n");
-    wchar_t diagnostic[2];
-    if (GetEnvironmentVariableW(L"MYIME_DIAGNOSTICS",diagnostic,2)==1 && diagnostic[0]==L'1') std::fprintf(stderr,"MYIME: %s\n",m);
-}
 class Edit final : public ITfEditSession {
     long refs_=1;
     WindowsInputAdapter* service_;
@@ -93,6 +88,11 @@ HRESULT collapse_selection(ITfContext* c,ITfRange* r,TfEditCookie ec) {
     TF_SELECTION s{caret.Get(),{TF_AE_NONE,FALSE}}; return c->SetSelection(ec,1,&s);
 }
 }
+void WindowsInputAdapter::log_failure(const char* message) {
+    wchar_t text[512]{};
+    MultiByteToWideChar(CP_UTF8,0,message,-1,text,_countof(text));
+    diagnostics_.event(text,E_FAIL);
+}
 HRESULT WindowsInputAdapter::QueryInterface(REFIID iid,void** out) {
     if (!out) return E_POINTER; *out=nullptr;
     if (iid==IID_IUnknown || iid==IID_ITfTextInputProcessor || iid==IID_ITfTextInputProcessorEx) *out=static_cast<ITfTextInputProcessorEx*>(this);
@@ -108,24 +108,30 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
     if (manager_) return E_UNEXPECTED;
     if (flags & TF_TMAE_UIELEMENTENABLEDONLY) return E_NOTIMPL;
     try {
+        wchar_t local[32768]{};
+        if (GetEnvironmentVariableW(L"LOCALAPPDATA",local,_countof(local))) diagnostics_.configure(std::filesystem::path(local)/L"MYIME");
+        wchar_t stage[96]{}; swprintf_s(stage,L"ActivateEx flags=0x%08lX",flags); diagnostics_.event(stage);
+        diagnostics_.module(L"MSVCP140.dll");
         composition_observer_.Attach(new CompositionObserver);
         wchar_t module[32768]; auto n=GetModuleFileNameW(g_module,module,32768);
-        if (!n || n>=32768) return E_FAIL;
+        if (!n || n>=32768) { Deactivate(); return E_FAIL; }
+        diagnostics_.event(L"Engine initialization begin");
         engine_.open(std::filesystem::path(module).parent_path());
-        if (!window_.create(g_module,this,click)) { engine_.close(); return E_FAIL; }
+        diagnostics_.event(L"Engine initialization complete");
+        if (!window_.create(g_module,this,click)) { Deactivate(); return E_FAIL; }
         manager_=manager; client_=id;
         ComPtr<ITfSource> source; auto hr=manager_.As(&source);
         if (SUCCEEDED(hr)) hr=source->AdviseSink(IID_ITfThreadMgrEventSink,static_cast<ITfThreadMgrEventSink*>(this),&manager_cookie_);
         if (FAILED(hr)) log_failure("Advise thread manager sink failed");
         ComPtr<ITfKeystrokeMgr> keys;
         if (SUCCEEDED(hr)) hr=manager_.As(&keys);
-        if (SUCCEEDED(hr)) hr=keys->AdviseKeyEventSink(id,this,TRUE);
+        if (SUCCEEDED(hr)) { hr=keys->AdviseKeyEventSink(id,this,TRUE); key_sink_advised_=SUCCEEDED(hr); }
         if (FAILED(hr)) log_failure("Advise keyboard sink failed");
         if (FAILED(hr)) { Deactivate(); return hr; }
         ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context;
         if (SUCCEEDED(manager_->GetFocus(&document)) && document && SUCCEEDED(document->GetTop(&context))) switch_context(context.Get());
         OutputDebugStringW(L"MYIME: TSF activated\n"); return S_OK;
-    } catch (const std::exception& e) { log_failure(e.what()); Deactivate(); return E_FAIL; }
+    } catch (const std::exception&) { log_failure("Activation failed during initialization"); Deactivate(); return E_FAIL; }
     catch (...) { Deactivate(); return E_UNEXPECTED; }
 }
 void WindowsInputAdapter::reset() {
@@ -160,9 +166,10 @@ void WindowsInputAdapter::switch_context(ITfContext* c) {
 HRESULT WindowsInputAdapter::Deactivate() {
     switch_context(nullptr);
     if (manager_) {
-        ComPtr<ITfKeystrokeMgr> keys; if (SUCCEEDED(manager_.As(&keys))) keys->UnadviseKeyEventSink(client_);
+        ComPtr<ITfKeystrokeMgr> keys; if (key_sink_advised_ && SUCCEEDED(manager_.As(&keys))) keys->UnadviseKeyEventSink(client_);
         ComPtr<ITfSource> s; if (manager_cookie_!=TF_INVALID_COOKIE && SUCCEEDED(manager_.As(&s))) s->UnadviseSink(manager_cookie_);
     }
+    key_sink_advised_=false;
     manager_cookie_=TF_INVALID_COOKIE; manager_.Reset(); client_=TF_CLIENTID_NULL;
     window_.destroy(); engine_.close(); composition_observer_.Reset(); return S_OK;
 }
