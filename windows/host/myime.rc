@@ -1,0 +1,4 @@
+#include "resource.h"
+IDI_MYIME ICON "assets/brand.ico"
+IDI_MODE_ZH ICON "assets/mode-zh.ico"
+IDI_MODE_EN ICON "assets/mode-en.ico"

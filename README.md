@@ -2,7 +2,7 @@
 
 MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Windows/COM/文本编辑和候选窗口，Rust 负责输入状态、产品配置、AppProfile 及 Rime 安全封装。按键路径全部在应用进程内，无 socket、pipe、HTTP 或设置 GUI 依赖。
 
-当前是 **可构建、可部署数据、已通过组件及 TSF 文档测试的开发版**，不是已完成桌面应用验收的发布版。尚未在本轮执行系统注册、Notepad/Edge 手工输入或游戏测试。先阅读下方限制，再安装。
+当前是开发版。本次兼容性与图标更新 **未编译、未运行测试、未安装**；历史 MVP 测试结果不代表新代码已通过。构建及实际应用验收由用户执行，先阅读 [本次更新与升级清单](docs/compatibility-update.md)。
 
 ## 已实现
 
@@ -12,13 +12,15 @@ MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Wi
 - TSF edit session 中的 composition/文本提交、UTF-8 caret 到 UTF-16 转换。
 - 不夺焦点的竖排候选窗口：跟随 TSF caret，键盘/鼠标选词、上一页/下一页。
 - TOML 产品配置与 EXE AppProfile，基本诊断日志。
+- UI-less 当前页候选快照、受限应用独立数据目录、空闲状态标点交给 Rime。
+- 嵌入 DLL 的 MY 品牌图标、“中 / A”模式指示及右键置灰“设置”菜单；左键切换暂未实现。
 - 兼容性测试应用，以及 Importer、SyncProvider、DictionaryProvider、InputProvider、Converter、ConfigBridge、CompatibilityProvider 接口。
 
 ## 构建环境
 
 Windows 10/11 x64；Visual Studio 2022 的 **使用 C++ 的桌面开发**（MSVC x64、Windows SDK）；Rust `stable-x86_64-pc-windows-msvc`；Git。CMake 和 librime 由脚本下载到项目目录，不修改系统 PATH。
 
-已在本机使用 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0 完成 Debug/Release 构建。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
+历史 MVP 在本机使用 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0 完成过 Debug/Release 构建；本次修改尚未编译。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
 
 在项目根目录的 PowerShell 中执行：
 
@@ -52,11 +54,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Configu
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Configuration Release
 ```
 
-安装会将二进制复制到 `%ProgramFiles%/MYIME`，注册 COM、简体中文 TSF profile 和 keyboard category。使用 Windows 语言设置添加/选择 `MYIME Rime`，或通过 Win+Space 切换。必要时重启目标应用或重新登录。不会更改其他输入法或默认输入法。
+安装会将二进制复制到 `%ProgramFiles%/MYIME`，注册 COM、简体中文 TSF profile、keyboard/UI-less/immersive/system tray 类别。使用 Windows 语言设置添加/选择 `MYIME Rime`，或通过 Win+Space 切换。必要时重启目标应用或重新登录。不会更改其他输入法或默认输入法。
 
 目标机器需具备 Microsoft Visual C++ x64 运行库；开发机安装上述 VS 组件时已具备。MVP 安装脚本暂不自动分发运行库或签名二进制。
 
-当前执行会话没有管理员令牌，因此本轮未运行安装脚本。系统注册、真实系统键盘路由、Notepad/Edge 中的表现都仍待安装后验收。Debug DLL 依赖开发工具运行库，普通使用请安装 Release。
+依照协作约定，本次未运行安装脚本。系统注册、真实系统键盘路由、Notepad/Edge/开始菜单中的表现都仍待安装后验收。Debug DLL 依赖开发工具运行库，普通使用请安装 Release。
 
 卸载（管理员 PowerShell）：
 
@@ -83,13 +85,13 @@ build/Release/myime-compat.exe
 build/Release/myime-compat.exe --uiless
 ```
 
-包含普通 Windows EDIT、自绘 TSF 文档、composition 拒绝开关、TSF UI Element 候选观察，以及 7/9 个显示槽位。日志保留引擎的真实 page offset，显示槽位数不会修改 Rime page size；不记录键入正文到文件。先设置测试选项，再聚焦文本区输入。
+包含普通 Windows EDIT、自绘 TSF 文档、composition 拒绝开关、TSF UI Element 候选观察，以及 7/9 个显示槽位。日志显示输入法报告的候选索引；MYIME 当前采用局部单页快照，page offset 为 0，真实翻页需对照候选内容。显示槽位数不会修改 Rime page size；不记录键入正文到文件。先设置测试选项，再聚焦文本区输入。
 
-`--uiless` 用于比较实现 UI-less 协议的输入法。**当前 MYIME 不宣称支持 application-rendered UI，也不在 UI-less 线程激活**；普通模式使用 MYIME 自己的候选窗口。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。因此不承诺《战舰世界》或其他游戏兼容。
+`--uiless` 用于比较实现 UI-less 协议的输入法。本次已添加 MYIME 的 UI Element 当前页适配，但尚未运行验收；不等于已通过开始菜单或游戏测试。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。
 
 ## 调试与目录
 
-VS 附加到使用输入法的应用进程，加载 `build/Debug/myime_host.pdb`，观察 OutputDebugString 的 `MYIME:` 日志。设置目标进程环境变量 `MYIME_DIAGNOSTICS=1` 可同时将错误写到 stderr。Rime 只启用 ERROR 级别默认日志，位于系统临时目录；不在常规日志中输出按键/正文。
+VS 附加到使用输入法的应用进程，加载 `build/Debug/myime_host.pdb`，观察 OutputDebugString 的 `MYIME:` 日志。设置目标进程环境变量 `MYIME_DIAGNOSTICS=1` 可启用 `%LOCALAPPDATA%/MYIME/logs/host-<PID>.log`；受限应用使用系统返回的自身本地目录下的 `MYIME/logs`。目标进程需重新启动并继承环境变量。每文件约 1 MiB 循环截断，不可写时仅调试输出。Rime 自身 ERROR 日志仍使用其默认位置，通常为临时目录。不记录按键/正文。
 
 ```text
 crates/core/          Rust 状态、配置、FFI、Rime 安全封装、扩展接口
@@ -104,7 +106,7 @@ docs/                架构约束、测试范围与后续工作
 
 ## 当前边界
 
-仅 x64；尚无 x86/ARM64、IMM32 adapter、UI-less candidate element、语言栏按钮、完整 DPI/皮肤系统、部署 GUI、词库导入或 WebDAV 实现。候选窗口有字体/颜色等平台样式结构，但还没有主题加载和预览。极大 page size、复杂多显示器缩放、受保护/沙箱应用、外部选择区移动及异常 text store 行为仍需实际应用测试。
+仅 x64；尚无 x86/ARM64、IMM32 adapter、完整搜索建议集成、完整 DPI/皮肤/UIA 系统、设置 GUI、词库导入或 WebDAV 实现。UI-less 只导出当前 Rime 页，不能跨页随机访问或接受应用重新分页；受限应用的学习和配置独立，未实现合并。极大 page size、复杂多显示器缩放、受保护/沙箱应用、外部选择区移动及异常 text store 行为仍需实际应用测试。不声明安全桌面支持。
 
 StartComposition 被应用拒绝时，当前 Windows 会保留一个独立的 composition 回调对象；它不持有服务/Core，DLL 会按 COM 引用计数保持映射直到外部引用释放。文档写入失败后暂停该 context 的输入，等待焦点切换恢复；不伪造成功 commit。详情见 [架构说明](docs/architecture.md)。
 

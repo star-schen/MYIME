@@ -117,6 +117,7 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
         wchar_t stage[96]{}; swprintf_s(stage,L"ActivateEx flags=0x%08lX",flags); diagnostics_.event(stage);
         diagnostics_.event(paths.app_container?L"AppContainer isolated storage":L"Desktop storage");
         diagnostics_.event(paths.root.c_str());
+        diagnostics_.module(nullptr);
         diagnostics_.module(L"MSVCP140.dll");
         ComPtr<ITfThreadMgrEx> extended;
         DWORD active_flags=0;
@@ -127,12 +128,19 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
         wchar_t module[32768]; auto n=GetModuleFileNameW(g_module,module,32768);
         if (!n || n>=32768) { Deactivate(); return E_FAIL; }
         diagnostics_.event(L"Engine initialization begin");
-        engine_.open(std::filesystem::path(module).parent_path(),paths.root);
+        engine_.open(std::filesystem::path(module).parent_path(),paths.root,diagnostics_);
         diagnostics_.event(L"Engine initialization complete");
         diagnostics_.module(L"myime_core.dll"); diagnostics_.module(L"rime.dll");
         manager_=manager; client_=id;
         auto hr=manager_.As(&ui_manager_);
         if (FAILED(hr)) { diagnostics_.event(L"UIElement manager unavailable",hr); Deactivate(); return hr; }
+        hr=manager_.As(&language_bar_);
+        if (SUCCEEDED(hr)) {
+            mode_indicator_.Attach(new ModeIndicator);
+            hr=language_bar_->AddItem(mode_indicator_.Get()); mode_added_=SUCCEEDED(hr);
+        }
+        if (FAILED(hr)) { diagnostics_.event(L"Mode indicator registration failed",hr); Deactivate(); return hr; }
+        update_mode();
         ComPtr<ITfSourceSingle> functions;
         hr=manager_.As(&functions);
         if (SUCCEEDED(hr)) { hr=functions->AdviseSingleSink(client_,IID_ITfFunctionProvider,static_cast<ITfFunctionProvider*>(this)); function_advised_=SUCCEEDED(hr); }
@@ -148,6 +156,9 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
         ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context;
         if (SUCCEEDED(manager_->GetFocus(&document)) && document && SUCCEEDED(document->GetTop(&context))) switch_context(context.Get());
         OutputDebugStringW(L"MYIME: TSF activated\n"); return S_OK;
+    } catch (const std::filesystem::filesystem_error& error) {
+        const auto hr=HRESULT_FROM_WIN32(error.code().value());
+        diagnostics_.event(L"Storage access failed",hr); Deactivate(); return hr;
     } catch (const std::exception&) { log_failure("Activation failed during initialization"); Deactivate(); return E_FAIL; }
     catch (...) { Deactivate(); return E_UNEXPECTED; }
 }
@@ -159,6 +170,7 @@ void WindowsInputAdapter::reset() {
         if (cancel) { HRESULT result; context_->RequestEditSession(client_,cancel,TF_ES_ASYNCDONTCARE|TF_ES_READWRITE,&result); cancel->Release(); }
     }
     if (engine_.handle) engine_.clear(engine_.handle);
+    update_mode();
     faulted_=false;
 }
 void WindowsInputAdapter::switch_context(ITfContext* c) {
@@ -171,6 +183,7 @@ void WindowsInputAdapter::switch_context(ITfContext* c) {
     if (engine_.handle) {
         try { if (!engine_.profile()) log_failure("AppProfile resolution failed"); }
         catch (...) { engine_.enabled=false; log_failure("AppProfile resolution failed"); }
+        update_mode();
     }
     if (context_) {
         ComPtr<ITfSource> s;
@@ -181,6 +194,9 @@ void WindowsInputAdapter::switch_context(ITfContext* c) {
     }
 }
 HRESULT WindowsInputAdapter::Deactivate() {
+    if (mode_indicator_) mode_indicator_->detach();
+    if (mode_added_ && language_bar_) language_bar_->RemoveItem(mode_indicator_.Get());
+    mode_added_=false; mode_indicator_.Reset(); language_bar_.Reset();
     switch_context(nullptr);
     if (manager_) {
         ComPtr<ITfKeystrokeMgr> keys; if (key_sink_advised_ && SUCCEEDED(manager_.As(&keys))) keys->UnadviseKeyEventSink(client_);
@@ -261,6 +277,7 @@ HRESULT WindowsInputAdapter::edit(TfEditCookie ec,ITfContext* c,int action,int k
         if (rc) { end_candidates(); log_failure("Core input operation failed"); return E_FAIL; }
         ++generation_;
         auto hr=apply(ec,c);
+        update_mode();
         if (FAILED(hr)) { faulted_=true; end_candidates(); window_.hide(); diagnostics_.event(L"Document/UI update failed; input suspended until focus change",hr); }
         return hr;
     } catch (...) { log_failure("Input edit exception"); faulted_=true; end_candidates(); window_.hide(); return E_FAIL; }
@@ -268,6 +285,7 @@ HRESULT WindowsInputAdapter::edit(TfEditCookie ec,ITfContext* c,int action,int k
 HRESULT WindowsInputAdapter::apply(TfEditCookie ec,ITfContext* c) {
     MyimeState s{}; if (engine_.state(engine_.handle,&s)) return E_FAIL;
     auto commit=wide(s.commit),preedit=wide(s.preedit); HRESULT hr=S_OK;
+    const auto caret_offset=wide({s.preedit.data,std::min(s.caret,s.preedit.len)}).size();
     if (!commit.empty()) {
         ComPtr<ITfRange> r;
         if (composition_) {
@@ -301,16 +319,23 @@ HRESULT WindowsInputAdapter::apply(TfEditCookie ec,ITfContext* c) {
     hr=r->SetText(ec,0,preedit.data(),static_cast<LONG>(preedit.size())); if (FAILED(hr)) return hr;
     ComPtr<ITfRange> caret; hr=r->Clone(&caret); if (FAILED(hr)) return hr;
     hr=caret->Collapse(ec,TF_ANCHOR_START); if (FAILED(hr)) return hr;
-    auto offset=wide({s.preedit.data,std::min(s.caret,s.preedit.len)}).size(); LONG moved=0;
-    hr=caret->ShiftStart(ec,static_cast<LONG>(offset),&moved,nullptr); if (FAILED(hr)) return hr;
+    LONG moved=0;
+    hr=caret->ShiftStart(ec,static_cast<LONG>(caret_offset),&moved,nullptr); if (FAILED(hr)) return hr;
     hr=caret->Collapse(ec,TF_ANCHOR_START); if (FAILED(hr)) return hr;
     TF_SELECTION selection{caret.Get(),{TF_AE_NONE,FALSE}}; hr=c->SetSelection(ec,1,&selection); if (FAILED(hr)) return hr;
     return position(ec,c);
 }
+void WindowsInputAdapter::update_mode() {
+    MyimeState state{};
+    if (mode_indicator_ && engine_.handle && !engine_.state(engine_.handle,&state)) mode_indicator_->update((state.options&1)!=0);
+}
 HRESULT WindowsInputAdapter::position(TfEditCookie ec,ITfContext* c) {
     MyimeState s{}; if (engine_.state(engine_.handle,&s)) return E_FAIL;
     if (!s.active) { end_candidates(); window_.hide(); return S_OK; }
-    auto hr=publish_candidates(s); if (FAILED(hr)) return hr;
+    auto hr=publish_candidates(s); if (hr!=S_OK) return hr;
+    // UIElement callbacks are external COM calls and may re-enter the service.
+    if (!engine_.handle || c!=context_.Get()) return S_FALSE;
+    if (engine_.state(engine_.handle,&s)) return E_FAIL;
     if (force_uiless_ || (candidate_element_ && !candidate_element_->shown())) { window_.hide(); return S_OK; }
     ComPtr<ITfContextView> view; if (FAILED(c->GetActiveView(&view))) return S_OK;
     HWND parent=nullptr;
@@ -359,32 +384,38 @@ void WindowsInputAdapter::end_candidates() {
 HRESULT WindowsInputAdapter::publish_candidates(const MyimeState& state) {
     if (!state.count) { end_candidates(); return S_OK; }
     if (element_started_ && element_generation_==generation_) return S_OK;
-    end_candidates();
     if (!ui_manager_ || !context_) return E_UNEXPECTED;
+    const auto generation=generation_;
+    auto context=context_; auto manager=ui_manager_;
     std::vector<std::wstring> words; words.reserve(state.count);
+    const auto selection=static_cast<UINT>(state.selected);
     for (size_t i=0;i<state.count;++i) {
         MyimeCandidate candidate{};
         if (engine_.candidate(engine_.handle,i,&candidate)) return E_FAIL;
         words.push_back(wide(candidate.text));
     }
     ComPtr<ITfDocumentMgr> document;
-    auto hr=context_->GetDocumentMgr(&document); if (FAILED(hr)) return hr;
+    auto hr=context->GetDocumentMgr(&document); if (FAILED(hr)) return hr;
+    end_candidates();
+    if (generation_!=generation || context_.Get()!=context.Get() || ui_manager_.Get()!=manager.Get()) return S_FALSE;
     auto element=new(std::nothrow) CandidateElement(document.Get(),std::move(words),
-        static_cast<UINT>(state.selected),this,candidate_action,candidate_visibility,generation_);
+        selection,this,candidate_action,candidate_visibility,generation,!force_uiless_);
     if (!element) return E_OUTOFMEMORY;
     candidate_element_.Attach(element); element_generation_=generation_;
     // Each engine mutation creates a fresh snapshot. Retained previous objects
     // are inert, including objects retained across pages or context switches.
     ComPtr<CandidateElement> keep_alive=candidate_element_;
     BOOL show=TRUE; DWORD id=0;
-    hr=ui_manager_->BeginUIElement(element,&show,&id);
+    hr=manager->BeginUIElement(element,&show,&id);
     if (FAILED(hr)) { end_candidates(); return hr; }
     if (candidate_element_.Get()!=element || element_generation_!=generation_) {
-        element->detach(); ui_manager_->EndUIElement(id); return S_FALSE;
+        element->detach(); manager->EndUIElement(id); return S_FALSE;
     }
     element_id_=id; element_started_=true;
     element->initial_visibility(force_uiless_?FALSE:show);
-    return ui_manager_->UpdateUIElement(id);
+    hr=manager->UpdateUIElement(id);
+    if (FAILED(hr)) return hr;
+    return generation_==generation && candidate_element_.Get()==element ? S_OK : S_FALSE;
 }
 HRESULT WindowsInputAdapter::candidate_action(void* owner,int action,unsigned long long generation) {
     auto self=static_cast<WindowsInputAdapter*>(owner);

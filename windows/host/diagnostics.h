@@ -48,6 +48,6 @@ public:
         wchar_t path[32768]{};
         if (auto module=GetModuleHandleW(name)) {
             if (GetModuleFileNameW(module,path,_countof(path))) event(path);
-        } else event(name,HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND));
+        } else event(name?name:L"Process module unavailable",HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND));
     }
 };

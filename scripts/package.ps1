@@ -9,6 +9,7 @@ foreach ($file in @('myime_host.dll','myime_core.dll','rime.dll','myime-compat.e
 Copy-Item "$source/data" $package -Recurse -Force
 Copy-Item "$root/LICENSE","$root/README.md","$root/THIRD_PARTY.md","$root/dependencies.lock.json" $package -Force
 Copy-Item "$root/config/product.example.toml" $package -Force
+Copy-Item "$root/docs" $package -Recurse -Force
 foreach ($entry in (Get-Content "$root/dependencies.lock.json" -Raw | ConvertFrom-Json).data) {
     $notice = Join-Path $package "notices/$($entry.repo)"
     New-Item -ItemType Directory -Force $notice | Out-Null

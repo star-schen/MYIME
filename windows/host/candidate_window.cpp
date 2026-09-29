@@ -3,6 +3,7 @@
 #include <algorithm>
 namespace { long window_classes=0; }
 bool CandidateWindow::create(HINSTANCE module, void* owner, Action action) {
+    destroy();
     owner_=owner; action_=action;
     WNDCLASSW wc{}; wc.lpfnWndProc=procedure; wc.hInstance=module; wc.lpszClassName=L"MYIME.Candidates.v1"; wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);
     if (!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return false;
@@ -47,6 +48,11 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l
     auto self=reinterpret_cast<CandidateWindow*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
     if (msg==WM_NCCREATE) { self=static_cast<CandidateWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams); SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self)); }
     if (!self) return DefWindowProcW(hwnd,msg,w,l);
+    if (msg==WM_NCDESTROY) {
+        self->window_=nullptr;
+        SetWindowLongPtrW(hwnd,GWLP_USERDATA,0);
+        return DefWindowProcW(hwnd,msg,w,l);
+    }
     if (msg==WM_MOUSEACTIVATE) return MA_NOACTIVATE;
     if (msg==WM_ERASEBKGND) return 1;
     if (msg==WM_LBUTTONUP) {

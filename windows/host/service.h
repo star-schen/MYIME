@@ -7,6 +7,7 @@
 #include "candidate_window.h"
 #include "diagnostics.h"
 #include "candidate_element.h"
+#include "mode_indicator.h"
 using Microsoft::WRL::ComPtr;
 class WindowsInputAdapter final : public ITfTextInputProcessorEx, public ITfKeyEventSink,
     public ITfTextEditSink, public ITfThreadMgrEventSink, public ITfTextLayoutSink, public ITfFunctionProvider {
@@ -52,6 +53,10 @@ private:
     bool key_sink_advised_=false;
     bool function_advised_=false;
     bool force_uiless_=false;
+    ComPtr<ITfLangBarItemMgr> language_bar_;
+    ComPtr<ModeIndicator> mode_indicator_;
+    bool mode_added_=false;
+    void update_mode();
     ComPtr<ITfUIElementMgr> ui_manager_;
     ComPtr<CandidateElement> candidate_element_;
     DWORD element_id_=0;

@@ -1,12 +1,13 @@
 #include "service.h"
 #include <new>
 #include <string>
+#include "resource.h"
 HMODULE g_module=nullptr;
 long g_objects=0;
 // Register only capabilities implemented by the Host. No secure desktop or
 // input-mode compartment capability is claimed by this MVP.
 static const GUID* const categories[]={&GUID_TFCAT_TIP_KEYBOARD,
-    &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,&GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT};
+    &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,&GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,&GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT};
 class Factory final : public IClassFactory {
     long refs_=1;
 public:
@@ -81,7 +82,7 @@ extern "C" HRESULT __stdcall DllRegisterServer() {
         ComPtr<ITfInputProcessorProfiles> profiles;
         if (SUCCEEDED(hr)) hr=CoCreateInstance(CLSID_TF_InputProcessorProfiles,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&profiles));
         if (SUCCEEDED(hr)) hr=profiles->Register(kService);
-        if (SUCCEEDED(hr)) hr=profiles->AddLanguageProfile(kService,kLanguage,kProfile,L"MYIME Rime",10,path,len,0);
+        if (SUCCEEDED(hr)) hr=profiles->AddLanguageProfile(kService,kLanguage,kProfile,L"MYIME Rime",10,path,len,MYIME_BRAND_ICON_INDEX);
         ComPtr<ITfCategoryMgr> category;
         if (SUCCEEDED(hr)) hr=CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&category));
         for (const auto* id:categories) { if (FAILED(hr)) break; hr=category->RegisterCategory(kService,*id,kService); }

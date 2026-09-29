@@ -12,9 +12,9 @@ public:
     using Action=HRESULT(*)(void*,int,unsigned long long);
     using Visibility=void(*)(void*,BOOL);
     CandidateElement(ITfDocumentMgr* document,std::vector<std::wstring> words,UINT selection,
-        void* owner,Action action,Visibility visibility,unsigned long long generation)
+        void* owner,Action action,Visibility visibility,unsigned long long generation,bool can_show)
         :document_(document),words_(std::move(words)),selection_(selection),owner_(owner),
-         action_(action),visibility_(visibility),generation_(generation) { InterlockedIncrement(&g_objects); }
+         action_(action),visibility_(visibility),generation_(generation),can_show_(can_show) { InterlockedIncrement(&g_objects); }
     ~CandidateElement() { InterlockedDecrement(&g_objects); }
     void detach() noexcept { owner_=nullptr; action_=nullptr; visibility_=nullptr; shown_=FALSE; document_.Reset(); }
     bool shown() const noexcept { return shown_!=FALSE; }
@@ -31,7 +31,7 @@ public:
     STDMETHODIMP Show(BOOL show) override {
         if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
         if (!owner_) return S_FALSE;
-        shown_=show; visibility_(owner_,show); return S_OK;
+        shown_=can_show_?show:FALSE; visibility_(owner_,shown_); return S_OK;
     }
     STDMETHODIMP IsShown(BOOL* value) override { if (!value) return E_POINTER; *value=shown_; return S_OK; }
     STDMETHODIMP GetUpdatedFlags(DWORD* value) override {
@@ -78,6 +78,7 @@ private:
     Visibility visibility_=nullptr;
     unsigned long long generation_=0;
     BOOL shown_=FALSE;
+    bool can_show_=true;
     HRESULT invoke(int action) {
         if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
         return owner_ && action_ ? action_(owner_,action,generation_) : S_FALSE;

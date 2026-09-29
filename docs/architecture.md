@@ -58,7 +58,9 @@ application-rendered UI 通过 `ITfUIElementMgr` 与 `ITfCandidateListUIElementB
 
 COM server 使用 Apartment 线程模型，DLL 引用计数包括 factory、service、edit session 和 composition observer。DllMain 只保存模块句柄。通过绝对路径与 DLL_LOAD_DIR/DEFAULT_DIRS 安全加载 Core 及其依赖，避免依赖工作目录。安装到 Program Files；注册同时处理 COM、TSF profile 和 keyboard category。[官方注册说明](https://learn.microsoft.com/en-us/windows/win32/tsf/text-service-registration)
 
-键盘转换使用 Windows ToUnicodeEx 的不修改 dead-key 状态选项，v1 主要覆盖 ASCII schema 输入和编辑键。只读/禁用 context 和 password input scope 不送入学习引擎；Ctrl/Alt/Win 组合键交回应用。错误写 OutputDebugString，不记录正文。FFI 将 Rust unwind 转换成错误；非法 native 地址、进程级 OOM/abort 并不在可恢复范围内。
+键盘转换使用 Windows ToUnicodeEx 的不修改 dead-key 状态选项，v1 主要覆盖 ASCII schema 输入和编辑键。只读/禁用 context 和 password input scope 不送入学习引擎；Ctrl/Alt/Win 组合键交回应用。错误写 OutputDebugString，可选启用身份隔离目录中的限量日志，不记录正文。FFI 将 Rust unwind 转换成错误；非法 native 地址、进程级 OOM/abort 并不在可恢复范围内。
+
+模式指示器使用 ITfLangBarItemButton/ITfSource + GUID_LBI_INPUTMODE，读取 Core options 的 ascii_mode，不持有 Core handle。右键菜单只有置灰设置项，左键暂不切换。未来 GUI 启动器替换 OpenSettings 动作即可；跨平台 Core 不引入 HWND/HICON/COM 或 GUI 依赖。SVG 源稿与导出的 ICO 同存平台资源目录，构建嵌入资源，不自动运行素材生成脚本。
 
 文本写入失败时暂停当前 context，避免继续破坏已知状态；切换焦点重置后恢复。该策略不能把失败文档事务神奇回滚成原状态，相关故障注入与实际应用恢复仍要继续完善。
 

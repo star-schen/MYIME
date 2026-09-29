@@ -12,6 +12,8 @@ if ($LASTEXITCODE) { throw 'Rust tests failed' }
 if ($LASTEXITCODE) { throw 'C ABI / librime integration failed' }
 & "$root/build/$Configuration/myime-com-probe.exe"
 if ($LASTEXITCODE) { throw 'COM lifetime test failed' }
+& "$root/build/$Configuration/myime-candidate-probe.exe"
+if ($LASTEXITCODE) { throw 'Candidate snapshot/lifetime test failed' }
 & "$root/build/$Configuration/myime-tsf-probe.exe"
 if ($LASTEXITCODE) { throw 'TSF document test failed' }
 & "$root/build/$Configuration/myime-tsf-probe.exe" --reject
