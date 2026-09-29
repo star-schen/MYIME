@@ -3,6 +3,10 @@
 #include <string>
 HMODULE g_module=nullptr;
 long g_objects=0;
+// Register only capabilities implemented by the Host. No secure desktop or
+// input-mode compartment capability is claimed by this MVP.
+static const GUID* const categories[]={&GUID_TFCAT_TIP_KEYBOARD,
+    &GUID_TFCAT_TIPCAP_UIELEMENTENABLED,&GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT};
 class Factory final : public IClassFactory {
     long refs_=1;
 public:
@@ -49,8 +53,9 @@ extern "C" HRESULT __stdcall DllUnregisterServer() {
     HRESULT hr=CoCreateInstance(CLSID_TF_InputProcessorProfiles,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&profiles));
     if (SUCCEEDED(hr)) hr=profiles->Unregister(kService);
     ComPtr<ITfCategoryMgr> category;
-    if (SUCCEEDED(CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&category))))
-        category->UnregisterCategory(kService,GUID_TFCAT_TIP_KEYBOARD,kService);
+    if (SUCCEEDED(CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&category)))) {
+        for (const auto* id:categories) category->UnregisterCategory(kService,*id,kService);
+    }
     try {
         const auto rc=RegDeleteTreeW(HKEY_LOCAL_MACHINE,clsid_path().c_str());
         if (rc!=ERROR_SUCCESS && rc!=ERROR_FILE_NOT_FOUND && SUCCEEDED(hr)) hr=HRESULT_FROM_WIN32(rc);
@@ -79,7 +84,7 @@ extern "C" HRESULT __stdcall DllRegisterServer() {
         if (SUCCEEDED(hr)) hr=profiles->AddLanguageProfile(kService,kLanguage,kProfile,L"MYIME Rime",10,path,len,0);
         ComPtr<ITfCategoryMgr> category;
         if (SUCCEEDED(hr)) hr=CoCreateInstance(CLSID_TF_CategoryMgr,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&category));
-        if (SUCCEEDED(hr)) hr=category->RegisterCategory(kService,GUID_TFCAT_TIP_KEYBOARD,kService);
+        for (const auto* id:categories) { if (FAILED(hr)) break; hr=category->RegisterCategory(kService,*id,kService); }
         if (SUCCEEDED(hr)) hr=profiles->EnableLanguageProfile(kService,kLanguage,kProfile,TRUE);
     } catch (...) { hr=E_OUTOFMEMORY; }
     CoUninitialize();

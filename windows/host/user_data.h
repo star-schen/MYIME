@@ -30,6 +30,7 @@ public:
     std::filesystem::path acquire(const std::filesystem::path& root) {
         auto& state=shared(); ExclusiveLock guard(state.mutex);
         if (acquired_) return state.path;
+        if (state.users && state.path.parent_path()!=root) throw std::runtime_error("User directory identity changed in this process");
         if (!state.users) {
             for (unsigned i=0;i<256;++i) {
                 auto path=root/std::to_wstring(i);
@@ -41,8 +42,13 @@ public:
             }
             if (state.file==INVALID_HANDLE_VALUE) throw std::runtime_error("No free Rime user directory slot");
         }
-        auto result=state.path; // Allocate before taking ownership of a reference.
-        ++state.users; acquired_=true; return result;
+        try {
+            auto result=state.path;
+            ++state.users; acquired_=true; return result;
+        } catch (...) {
+            if (!state.users) { CloseHandle(state.file); state.file=INVALID_HANDLE_VALUE; state.path.clear(); }
+            throw;
+        }
     }
     void release() {
         if (!acquired_) return;

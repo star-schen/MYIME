@@ -16,7 +16,7 @@ add_custom_target(stage_runtime ALL
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/target/${RUST_PROFILE}/myime_core.dll" "${CMAKE_BINARY_DIR}/$<CONFIG>/myime_core.dll"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/.deps/librime/dist/lib/rime.dll" "${CMAKE_BINARY_DIR}/$<CONFIG>/rime.dll")
 add_library(myime_host SHARED windows/host/dll.cpp windows/host/service.cpp windows/host/candidate_window.cpp windows/host/myime.def)
-target_link_libraries(myime_host PRIVATE ole32 oleaut32 advapi32 uuid user32 gdi32)
+target_link_libraries(myime_host PRIVATE ole32 oleaut32 advapi32 uuid user32 gdi32 shell32 userenv)
 target_include_directories(myime_host PRIVATE include)
 add_executable(myime-com-probe tools/probe/com.cpp)
 target_include_directories(myime-com-probe PRIVATE windows/host)

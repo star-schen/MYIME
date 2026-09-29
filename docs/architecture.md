@@ -46,7 +46,13 @@ TSF 要求写操作位于 read/write edit session。`OnTestKeyDown/Up` 不改变
 
 ### 应用自绘候选与 Host 窗口并存
 
-application-rendered UI 必须通过 `ITfUIElementMgr`、`ITfCandidateListUIElement` 和 `BeginUIElement` 的 `pbShow` 协商。仅实现一个候选 HWND 不等于支持此模式。因此 MVP 不注册 UI-less capability，并拒绝 `TF_TMAE_UIELEMENTENABLEDONLY`；测试程序可观察其他实现这一协议的输入法。未来完整 UI Element adapter 必须向应用报告 Rime 的真实页边界，不能根据游戏固定 9 行推断 engine page_size。[官方 UI-less 说明](https://learn.microsoft.com/en-us/windows/win32/tsf/uiless-mode-overview)
+application-rendered UI 通过 `ITfUIElementMgr` 与 `ITfCandidateListUIElementBehavior` 协商；遵守 `BeginUIElement` 的 `pbShow`，UI-less 激活不显示自有窗口。每次引擎状态变化都会结束旧候选对象、发布新快照，旧对象保留查询内容但禁用操作，不持有服务引用。异步选词同时校验 context 和 generation。[官方 UI-less 说明](https://learn.microsoft.com/en-us/windows/win32/tsf/uiless-mode-overview)
+
+当前 Core ABI 只有 Rime 当前页，并无整个候选列表。因此每个 UI Element 是单页局部快照：count 等于当前页候选数，page index 为 `[0]`，current page 为 0。不会伪造全局总数或填充不存在的候选。Rime 的真实页码仍用于 Host 窗口显示；PgUp/PgDn 仍交给 Rime，再发布新的页快照。SetPageIndex 只接受这个单页边界，不允许应用的 7/9 行布局改变引擎分页。跨页随机访问、集成搜索建议接口尚未实现，须明确区分基本 UI-less 支持与完整搜索集成。
+
+在应用自绘候选时 SetSelection 记录该快照的待提交项，Finalize 通过 Core 的 page-local select 提交；不会改写 Rime 候选排序或词频。Abort 通过 edit session 清空组合。基础模式/触摸键盘通过 ITfFunctionProvider 提供经典键盘布局，未声明安全桌面或输入模式 compartment 支持。
+
+受限应用的身份由有效令牌确定：AppContainer 使用系统 GetAppContainerFolderPath 返回目录，普通应用使用 FOLDERID_LocalAppData，各自在其下使用 MYIME/rime/slots。只读词库来自 Program Files 的预部署数据。不会扩大用户词库 ACL、复制 live userdb 或在输入路径部署。受限环境的学习与配置独立，尚未合并；目录不可写时激活失败并记录阶段。[系统目录接口](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-getappcontainerfolderpath)
 
 ## 系统接入和错误处理
 
@@ -60,4 +66,4 @@ COM server 使用 Apartment 线程模型，DLL 引用计数包括 factory、serv
 
 原生 librime 调用参考 [rime_api.h](https://github.com/rime/librime/blob/1.17.0/src/rime_api.h)。扩展 trait 是源代码级接口，不是稳定二进制插件 ABI。词库包优先 manifest+data+metadata；Importer 只输出 word/code/frequency/source 中间模型；SyncProvider 传输 Rime 导出的数据并通过 ETag/If-Match 表达冲突，均不进入按键路径。
 
-下一轮先完成管理员安装与 Notepad/Edge 验收，再补 IME UI Element/IMM32 适配、跨进程用户词库 merge、显示属性/DPI、语言栏和热路径性能测量。游戏策略只能来自实际比较测试，不能根据 EXE 名硬编码猜测。
+本次更新的编译、安装与 Notepad/Edge/开始菜单/游戏验收均待用户执行。后续仍需跨进程用户词库 merge、完整搜索集成、IMM32 适配、UIA 可访问性、显示属性/DPI 和热路径性能测量。游戏策略只能来自实际比较测试，不能根据 EXE 名硬编码猜测。

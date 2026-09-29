@@ -9,9 +9,11 @@ bool CandidateWindow::create(HINSTANCE module, void* owner, Action action) {
     module_=module; InterlockedIncrement(&window_classes);
     window_=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|WS_EX_TOPMOST,wc.lpszClassName,L"",WS_POPUP|WS_BORDER,0,0,1,1,nullptr,nullptr,module,this);
     font_=CreateFontW(-theme_.font_size,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,theme_.font.c_str());
-    return window_ && font_;
+    if (!window_ || !font_) { destroy(); return false; }
+    return true;
 }
 void CandidateWindow::destroy() {
+    hide();
     if (window_) { DestroyWindow(window_); window_=nullptr; }
     if (font_) { DeleteObject(font_); font_=nullptr; }
     if (module_) { if (InterlockedDecrement(&window_classes)==0) UnregisterClassW(L"MYIME.Candidates.v1",module_); module_=nullptr; }
@@ -36,7 +38,9 @@ void CandidateWindow::update(Engine& engine, const MyimeState& state, RECT caret
     const int x=std::clamp(static_cast<int>(caret.left),static_cast<int>(info.rcWork.left),static_cast<int>(info.rcWork.right)-width_);
     int y=caret.bottom;
     if (y+height>info.rcWork.bottom) y=std::max(static_cast<int>(info.rcWork.top),static_cast<int>(caret.top)-height);
+    const bool visible=IsWindowVisible(window_)!=FALSE;
     SetWindowPos(window_,HWND_TOPMOST,x,y,width_,height,SWP_NOACTIVATE|SWP_SHOWWINDOW);
+    NotifyWinEvent(visible?EVENT_OBJECT_IME_CHANGE:EVENT_OBJECT_IME_SHOW,window_,OBJID_CLIENT,CHILDID_SELF);
     InvalidateRect(window_,nullptr,FALSE);
 }
 LRESULT CALLBACK CandidateWindow::procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {

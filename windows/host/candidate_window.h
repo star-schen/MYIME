@@ -13,7 +13,14 @@ public:
     ~CandidateWindow() { destroy(); }
     bool create(HINSTANCE module, void* owner, Action action);
     void destroy();
-    void hide() { if (window_) ShowWindow(window_,SW_HIDE); }
+    bool created() const noexcept { return window_!=nullptr; }
+    void set_parent(HWND parent) { if (window_) SetWindowLongPtrW(window_,GWLP_HWNDPARENT,reinterpret_cast<LONG_PTR>(parent)); }
+    void hide() {
+        if (window_ && IsWindowVisible(window_)) {
+            NotifyWinEvent(EVENT_OBJECT_IME_HIDE,window_,OBJID_CLIENT,CHILDID_SELF);
+            ShowWindow(window_,SW_HIDE);
+        }
+    }
     void update(Engine& engine, const MyimeState& state, RECT caret);
 private:
     static LRESULT CALLBACK procedure(HWND,UINT,WPARAM,LPARAM);

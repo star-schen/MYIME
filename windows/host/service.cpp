@@ -4,6 +4,8 @@
 #include <new>
 #include <algorithm>
 #include <cstdio>
+#include "data_paths.h"
+#include "functions.h"
 namespace {
 // No back-reference to the service. Windows may retain this sink when an owner
 // rejects StartComposition. Late callbacks cannot retain or touch an engine.
@@ -100,34 +102,49 @@ HRESULT WindowsInputAdapter::QueryInterface(REFIID iid,void** out) {
     else if (iid==IID_ITfTextEditSink) *out=static_cast<ITfTextEditSink*>(this);
     else if (iid==IID_ITfThreadMgrEventSink) *out=static_cast<ITfThreadMgrEventSink*>(this);
     else if (iid==IID_ITfTextLayoutSink) *out=static_cast<ITfTextLayoutSink*>(this);
+    else if (iid==IID_ITfFunctionProvider) *out=static_cast<ITfFunctionProvider*>(this);
     else return E_NOINTERFACE;
     AddRef(); return S_OK;
 }
 HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWORD flags) {
     if (!manager) return E_INVALIDARG;
     if (manager_) return E_UNEXPECTED;
-    if (flags & TF_TMAE_UIELEMENTENABLEDONLY) return E_NOTIMPL;
+    force_uiless_=(flags & TF_TMAE_UIELEMENTENABLEDONLY)!=0;
     try {
-        wchar_t local[32768]{};
-        if (GetEnvironmentVariableW(L"LOCALAPPDATA",local,_countof(local))) diagnostics_.configure(std::filesystem::path(local)/L"MYIME");
+        diagnostics_.event(L"Resolving data storage");
+        auto paths=DataPaths::resolve();
+        diagnostics_.configure(paths.root);
         wchar_t stage[96]{}; swprintf_s(stage,L"ActivateEx flags=0x%08lX",flags); diagnostics_.event(stage);
+        diagnostics_.event(paths.app_container?L"AppContainer isolated storage":L"Desktop storage");
+        diagnostics_.event(paths.root.c_str());
         diagnostics_.module(L"MSVCP140.dll");
+        ComPtr<ITfThreadMgrEx> extended;
+        DWORD active_flags=0;
+        if (SUCCEEDED(manager->QueryInterface(IID_PPV_ARGS(&extended))) && SUCCEEDED(extended->GetActiveFlags(&active_flags))) {
+            swprintf_s(stage,L"Thread manager flags=0x%08lX",active_flags); diagnostics_.event(stage);
+        }
         composition_observer_.Attach(new CompositionObserver);
         wchar_t module[32768]; auto n=GetModuleFileNameW(g_module,module,32768);
         if (!n || n>=32768) { Deactivate(); return E_FAIL; }
         diagnostics_.event(L"Engine initialization begin");
-        engine_.open(std::filesystem::path(module).parent_path());
+        engine_.open(std::filesystem::path(module).parent_path(),paths.root);
         diagnostics_.event(L"Engine initialization complete");
-        if (!window_.create(g_module,this,click)) { Deactivate(); return E_FAIL; }
+        diagnostics_.module(L"myime_core.dll"); diagnostics_.module(L"rime.dll");
         manager_=manager; client_=id;
-        ComPtr<ITfSource> source; auto hr=manager_.As(&source);
+        auto hr=manager_.As(&ui_manager_);
+        if (FAILED(hr)) { diagnostics_.event(L"UIElement manager unavailable",hr); Deactivate(); return hr; }
+        ComPtr<ITfSourceSingle> functions;
+        hr=manager_.As(&functions);
+        if (SUCCEEDED(hr)) { hr=functions->AdviseSingleSink(client_,IID_ITfFunctionProvider,static_cast<ITfFunctionProvider*>(this)); function_advised_=SUCCEEDED(hr); }
+        if (FAILED(hr)) { diagnostics_.event(L"Function provider registration failed",hr); Deactivate(); return hr; }
+        ComPtr<ITfSource> source; hr=manager_.As(&source);
         if (SUCCEEDED(hr)) hr=source->AdviseSink(IID_ITfThreadMgrEventSink,static_cast<ITfThreadMgrEventSink*>(this),&manager_cookie_);
         if (FAILED(hr)) log_failure("Advise thread manager sink failed");
         ComPtr<ITfKeystrokeMgr> keys;
         if (SUCCEEDED(hr)) hr=manager_.As(&keys);
         if (SUCCEEDED(hr)) { hr=keys->AdviseKeyEventSink(id,this,TRUE); key_sink_advised_=SUCCEEDED(hr); }
         if (FAILED(hr)) log_failure("Advise keyboard sink failed");
-        if (FAILED(hr)) { Deactivate(); return hr; }
+        if (FAILED(hr)) { diagnostics_.event(L"TSF sink registration failed",hr); Deactivate(); return hr; }
         ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context;
         if (SUCCEEDED(manager_->GetFocus(&document)) && document && SUCCEEDED(document->GetTop(&context))) switch_context(context.Get());
         OutputDebugStringW(L"MYIME: TSF activated\n"); return S_OK;
@@ -135,7 +152,7 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
     catch (...) { Deactivate(); return E_UNEXPECTED; }
 }
 void WindowsInputAdapter::reset() {
-    ++generation_; forwarded_.fill(false); window_.hide();
+    ++generation_; forwarded_.fill(false); end_candidates(); window_.hide();
     if (composition_ && context_) {
         auto old=composition_; composition_.Reset();
         auto cancel=new(std::nothrow) Cancel(old.Get());
@@ -152,7 +169,7 @@ void WindowsInputAdapter::switch_context(ITfContext* c) {
     edit_cookie_=TF_INVALID_COOKIE;
     layout_cookie_=TF_INVALID_COOKIE; context_=c;
     if (engine_.handle) {
-        try { if (!engine_.profile()) log_failure(engine_.last_error()); }
+        try { if (!engine_.profile()) log_failure("AppProfile resolution failed"); }
         catch (...) { engine_.enabled=false; log_failure("AppProfile resolution failed"); }
     }
     if (context_) {
@@ -168,22 +185,26 @@ HRESULT WindowsInputAdapter::Deactivate() {
     if (manager_) {
         ComPtr<ITfKeystrokeMgr> keys; if (key_sink_advised_ && SUCCEEDED(manager_.As(&keys))) keys->UnadviseKeyEventSink(client_);
         ComPtr<ITfSource> s; if (manager_cookie_!=TF_INVALID_COOKIE && SUCCEEDED(manager_.As(&s))) s->UnadviseSink(manager_cookie_);
+        ComPtr<ITfSourceSingle> functions; if (function_advised_ && SUCCEEDED(manager_.As(&functions))) functions->UnadviseSingleSink(client_,IID_ITfFunctionProvider);
     }
+    end_candidates(); ui_manager_.Reset(); function_advised_=false;
     key_sink_advised_=false;
     manager_cookie_=TF_INVALID_COOKIE; manager_.Reset(); client_=TF_CLIENTID_NULL;
     window_.destroy(); engine_.close(); composition_observer_.Reset(); return S_OK;
 }
-bool WindowsInputAdapter::eligible(ITfContext* c,WPARAM key) {
+bool WindowsInputAdapter::eligible(ITfContext* c,WPARAM key,LPARAM info) {
     if (!engine_.handle || !engine_.enabled || !c || faulted_ || key>=256) return false;
     if (GetKeyState(VK_CONTROL)<0 || GetKeyState(VK_MENU)<0 || GetKeyState(VK_LWIN)<0 || GetKeyState(VK_RWIN)<0) return false;
     if (disabled(c,GUID_COMPARTMENT_KEYBOARD_DISABLED) || disabled(c,GUID_COMPARTMENT_EMPTYCONTEXT)) return false;
     TF_STATUS status{}; if (FAILED(c->GetStatus(&status)) || (status.dwDynamicFlags&TF_SD_READONLY)) return false;
     MyimeState state{}; if (engine_.state(engine_.handle,&state)) return false;
     if (state.active) return key!=VK_CAPITAL;
-    return (key>='A' && key<='Z') || key==VK_SHIFT || key==VK_LSHIFT || key==VK_RSHIFT;
+    if (key==VK_SHIFT || key==VK_LSHIFT || key==VK_RSHIFT) return true;
+    int mask=0; const int symbol=translate(key,info,mask,false);
+    return symbol>=0x20 && symbol<0x7f;
 }
-HRESULT WindowsInputAdapter::OnTestKeyDown(ITfContext* c,WPARAM k,LPARAM,BOOL* eaten) {
-    if (!eaten) return E_POINTER; *eaten=eligible(c,k); return S_OK;
+HRESULT WindowsInputAdapter::OnTestKeyDown(ITfContext* c,WPARAM k,LPARAM info,BOOL* eaten) {
+    if (!eaten) return E_POINTER; *eaten=eligible(c,k,info); return S_OK;
 }
 HRESULT WindowsInputAdapter::OnTestKeyUp(ITfContext*,WPARAM k,LPARAM,BOOL* eaten) {
     if (!eaten) return E_POINTER; *eaten=k<256 && forwarded_[k]; return S_OK;
@@ -196,7 +217,7 @@ HRESULT WindowsInputAdapter::request(ITfContext* c,int a,int k,int m,bool sync,B
 }
 HRESULT WindowsInputAdapter::OnKeyDown(ITfContext* c,WPARAM k,LPARAM l,BOOL* eaten) {
     if (!eaten) return E_POINTER; *eaten=FALSE;
-    if (!eligible(c,k)) return S_OK;
+    if (!eligible(c,k,l)) return S_OK;
     switch_context(c);
     int mask=0; int symbol=translate(k,l,mask,false); if (!symbol) return S_OK;
     auto hr=request(c,-3,symbol,mask,true,eaten);
@@ -234,15 +255,15 @@ HRESULT WindowsInputAdapter::edit(TfEditCookie ec,ITfContext* c,int action,int k
         }
         uint32_t handled=0; int rc=0;
         if (action>=0) { rc=engine_.select(engine_.handle,static_cast<size_t>(action)); handled=rc==0; }
+        else if (action==-5) { rc=engine_.clear(engine_.handle); handled=rc==0; }
         else rc=engine_.key(engine_.handle,key,mask,&handled);
         *eaten=handled!=0;
-        if (rc) { log_failure(engine_.last_error()); return E_FAIL; }
+        if (rc) { end_candidates(); log_failure("Core input operation failed"); return E_FAIL; }
         ++generation_;
         auto hr=apply(ec,c);
-        if (FAILED(hr)) { faulted_=true; window_.hide(); log_failure("Document write failed; input suspended until focus change"); }
+        if (FAILED(hr)) { faulted_=true; end_candidates(); window_.hide(); diagnostics_.event(L"Document/UI update failed; input suspended until focus change",hr); }
         return hr;
-    } catch (const std::exception& e) { log_failure(e.what()); faulted_=true; window_.hide(); return E_FAIL; }
-    catch (...) { faulted_=true; window_.hide(); return E_UNEXPECTED; }
+    } catch (...) { log_failure("Input edit exception"); faulted_=true; end_candidates(); window_.hide(); return E_FAIL; }
 }
 HRESULT WindowsInputAdapter::apply(TfEditCookie ec,ITfContext* c) {
     MyimeState s{}; if (engine_.state(engine_.handle,&s)) return E_FAIL;
@@ -265,7 +286,7 @@ HRESULT WindowsInputAdapter::apply(TfEditCookie ec,ITfContext* c) {
             ComPtr<ITfRange> r; hr=composition_->GetRange(&r); if (SUCCEEDED(hr)) hr=r->SetText(ec,0,L"",0); if (FAILED(hr)) return hr;
             auto old=composition_; composition_.Reset(); hr=old->EndComposition(ec);
         }
-        window_.hide(); return hr;
+        end_candidates(); window_.hide(); return hr;
     }
     ComPtr<ITfRange> r;
     if (!composition_) {
@@ -288,13 +309,19 @@ HRESULT WindowsInputAdapter::apply(TfEditCookie ec,ITfContext* c) {
 }
 HRESULT WindowsInputAdapter::position(TfEditCookie ec,ITfContext* c) {
     MyimeState s{}; if (engine_.state(engine_.handle,&s)) return E_FAIL;
-    if (!s.active) { window_.hide(); return S_OK; }
+    if (!s.active) { end_candidates(); window_.hide(); return S_OK; }
+    auto hr=publish_candidates(s); if (FAILED(hr)) return hr;
+    if (force_uiless_ || (candidate_element_ && !candidate_element_->shown())) { window_.hide(); return S_OK; }
     ComPtr<ITfContextView> view; if (FAILED(c->GetActiveView(&view))) return S_OK;
+    HWND parent=nullptr;
+    if (FAILED(view->GetWnd(&parent)) || !parent) parent=GetFocus();
+    if (!parent) { window_.hide(); return S_OK; }
     TF_SELECTION selection{}; ULONG count=0;
     if (FAILED(c->GetSelection(ec,TF_DEFAULT_SELECTION,1,&selection,&count)) || !count) return S_OK;
     ComPtr<ITfRange> caret; caret.Attach(selection.range); RECT r{}; BOOL clipped=FALSE;
     if (FAILED(view->GetTextExt(ec,caret.Get(),&r,&clipped)) || clipped || (!r.left && !r.right && !r.top && !r.bottom)) { window_.hide(); return S_OK; }
-    window_.update(engine_,s,r); return S_OK;
+    if (!window_.created() && !window_.create(g_module,this,click)) return E_FAIL;
+    window_.set_parent(parent); window_.update(engine_,s,r); return S_OK;
 }
 void WindowsInputAdapter::click(void* owner,int candidate) {
     auto self=static_cast<WindowsInputAdapter*>(owner); if (!self->context_ || self->faulted_) return;
@@ -311,7 +338,7 @@ HRESULT WindowsInputAdapter::OnEndEdit(ITfContext* c,TfEditCookie,ITfEditRecord*
         if (identity.Get()==ours.Get()) return S_OK;
         view.Reset();
     }
-    composition_.Reset(); if (engine_.handle) engine_.clear(engine_.handle); ++generation_; window_.hide();
+    composition_.Reset(); if (engine_.handle) engine_.clear(engine_.handle); ++generation_; end_candidates(); window_.hide();
     return S_OK;
 }
 HRESULT WindowsInputAdapter::OnSetFocus(BOOL foreground) { if (!foreground) reset(); return S_OK; }
@@ -320,4 +347,63 @@ HRESULT WindowsInputAdapter::OnPushContext(ITfContext* c) { switch_context(c); r
 HRESULT WindowsInputAdapter::OnPopContext(ITfContext* c) { if (c==context_.Get()) switch_context(nullptr); return S_OK; }
 HRESULT WindowsInputAdapter::OnLayoutChange(ITfContext* c,TfLayoutCode code,ITfContextView*) {
     if (c==context_.Get()) { if (code==TF_LC_DESTROY) switch_context(nullptr); else if (composition_) request(c,-4,0,0,false,nullptr); } return S_OK;
+}
+void WindowsInputAdapter::end_candidates() {
+    auto old=candidate_element_;
+    candidate_element_.Reset();
+    if (old) old->detach();
+    const bool started=element_started_; const DWORD id=element_id_;
+    element_started_=false;
+    if (started && ui_manager_) ui_manager_->EndUIElement(id);
+}
+HRESULT WindowsInputAdapter::publish_candidates(const MyimeState& state) {
+    if (!state.count) { end_candidates(); return S_OK; }
+    if (element_started_ && element_generation_==generation_) return S_OK;
+    end_candidates();
+    if (!ui_manager_ || !context_) return E_UNEXPECTED;
+    std::vector<std::wstring> words; words.reserve(state.count);
+    for (size_t i=0;i<state.count;++i) {
+        MyimeCandidate candidate{};
+        if (engine_.candidate(engine_.handle,i,&candidate)) return E_FAIL;
+        words.push_back(wide(candidate.text));
+    }
+    ComPtr<ITfDocumentMgr> document;
+    auto hr=context_->GetDocumentMgr(&document); if (FAILED(hr)) return hr;
+    auto element=new(std::nothrow) CandidateElement(document.Get(),std::move(words),
+        static_cast<UINT>(state.selected),this,candidate_action,candidate_visibility,generation_);
+    if (!element) return E_OUTOFMEMORY;
+    candidate_element_.Attach(element); element_generation_=generation_;
+    // Each engine mutation creates a fresh snapshot. Retained previous objects
+    // are inert, including objects retained across pages or context switches.
+    ComPtr<CandidateElement> keep_alive=candidate_element_;
+    BOOL show=TRUE; DWORD id=0;
+    hr=ui_manager_->BeginUIElement(element,&show,&id);
+    if (FAILED(hr)) { end_candidates(); return hr; }
+    if (candidate_element_.Get()!=element || element_generation_!=generation_) {
+        element->detach(); ui_manager_->EndUIElement(id); return S_FALSE;
+    }
+    element_id_=id; element_started_=true;
+    element->initial_visibility(force_uiless_?FALSE:show);
+    return ui_manager_->UpdateUIElement(id);
+}
+HRESULT WindowsInputAdapter::candidate_action(void* owner,int action,unsigned long long generation) {
+    auto self=static_cast<WindowsInputAdapter*>(owner);
+    if (!self->context_ || self->faulted_ || self->generation_!=generation) return S_FALSE;
+    return self->request(self->context_.Get(),action,0,0,false,nullptr);
+}
+void WindowsInputAdapter::candidate_visibility(void* owner,BOOL show) {
+    auto self=static_cast<WindowsInputAdapter*>(owner);
+    if (!show || self->force_uiless_) self->window_.hide();
+    else if (self->context_) self->request(self->context_.Get(),-4,0,0,false,nullptr);
+}
+HRESULT WindowsInputAdapter::GetType(GUID* value) { if (!value) return E_POINTER; *value=kService; return S_OK; }
+HRESULT WindowsInputAdapter::GetDescription(BSTR* value) {
+    if (!value) return E_POINTER; *value=SysAllocString(L"MYIME functions"); return *value?S_OK:E_OUTOFMEMORY;
+}
+HRESULT WindowsInputAdapter::GetFunction(REFGUID function,REFIID iid,IUnknown** value) {
+    if (!value) return E_POINTER; *value=nullptr;
+    if (function!=GUID_NULL || iid!=IID_ITfFnGetPreferredTouchKeyboardLayout) return E_NOINTERFACE;
+    auto layout=new(std::nothrow) TouchKeyboardLayout;
+    if (!layout) return E_OUTOFMEMORY;
+    *value=static_cast<ITfFnGetPreferredTouchKeyboardLayout*>(layout); return S_OK;
 }

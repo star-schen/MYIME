@@ -6,9 +6,10 @@
 #include "engine.h"
 #include "candidate_window.h"
 #include "diagnostics.h"
+#include "candidate_element.h"
 using Microsoft::WRL::ComPtr;
 class WindowsInputAdapter final : public ITfTextInputProcessorEx, public ITfKeyEventSink,
-    public ITfTextEditSink, public ITfThreadMgrEventSink, public ITfTextLayoutSink {
+    public ITfTextEditSink, public ITfThreadMgrEventSink, public ITfTextLayoutSink, public ITfFunctionProvider {
 public:
     WindowsInputAdapter() { InterlockedIncrement(&g_objects); }
     ~WindowsInputAdapter() { Deactivate(); InterlockedDecrement(&g_objects); }
@@ -31,6 +32,9 @@ public:
     STDMETHODIMP OnPushContext(ITfContext*) override;
     STDMETHODIMP OnPopContext(ITfContext*) override;
     STDMETHODIMP OnLayoutChange(ITfContext*,TfLayoutCode,ITfContextView*) override;
+    STDMETHODIMP GetType(GUID*) override;
+    STDMETHODIMP GetDescription(BSTR*) override;
+    STDMETHODIMP GetFunction(REFGUID,REFIID,IUnknown**) override;
     HRESULT edit(TfEditCookie,ITfContext*,int action,int key,int mask,unsigned long long generation,BOOL* eaten);
 private:
     long refs_=1;
@@ -46,10 +50,21 @@ private:
     std::array<bool,256> forwarded_{};
     bool faulted_=false;
     bool key_sink_advised_=false;
+    bool function_advised_=false;
+    bool force_uiless_=false;
+    ComPtr<ITfUIElementMgr> ui_manager_;
+    ComPtr<CandidateElement> candidate_element_;
+    DWORD element_id_=0;
+    bool element_started_=false;
+    unsigned long long element_generation_=0;
+    void end_candidates();
+    HRESULT publish_candidates(const MyimeState&);
+    static HRESULT candidate_action(void*,int,unsigned long long);
+    static void candidate_visibility(void*,BOOL);
     Diagnostics diagnostics_;
     void log_failure(const char* message);
     unsigned long long generation_=0;
-    bool eligible(ITfContext*,WPARAM);
+    bool eligible(ITfContext*,WPARAM,LPARAM);
     void switch_context(ITfContext*);
     void reset();
     HRESULT request(ITfContext*,int,int,int,bool,BOOL*);
