@@ -42,6 +42,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Configurat
 
 ## 打包、安装和卸载
 
+**开发机推荐：双击项目根目录 `Install-MYIME.cmd`，选择 `1`。** 安装助手依次构建 Release、部署数据、打包，成功后才弹出 UAC 请求安装权限。选择 `2` 只安装已有包，选择 `3` 卸载；不会自动运行测试。助手尚未运行验收，不是独立分发的 MSI/EXE 安装包。
+
+升级无需事先手动卸载：新版放入 `%ProgramFiles%/MYIME/versions/<版本目录>` 后更新注册，不覆盖旧 DLL；注册失败会尝试恢复旧版注册并报告结果。完成后注销再登录，避免系统仍使用旧版。词库、配置和旧版文件保留；日志在 `%TEMP%/MYIME-Setup`。构建失败不会撤销当前输入法。
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1 -Configuration Release
 ```
@@ -66,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Configu
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall.ps1
 ```
 
-卸载只撤销注册，保留二进制和用户词库。更新前先切换到其他输入法、卸载并关闭使用 MYIME 的应用，再安装新版本；脚本不会强杀应用或强行覆盖已加载 DLL。
+卸载按当前注册路径撤销输入法，兼容旧版固定目录和新版版本目录，保留二进制和用户词库。升级可直接使用安装助手；脚本不会强杀应用、自动注销或强行覆盖已加载 DLL。
 
 ## 第一轮使用
 
