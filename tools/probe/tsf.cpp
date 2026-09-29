@@ -1,9 +1,12 @@
 #include "text_store.h"
 #include "ids.h"
 #include "manual_dispatch.h"
+#include "ui_observer.h"
 #include <cstdio>
-int main(int argc,char**) {
-    const bool reject_test=argc>1;
+#include <cstring>
+int main(int argc,char** argv) {
+    const bool reject_test=argc>1 && std::strcmp(argv[1],"--reject")==0;
+    const bool app_draws=argc>1 && std::strcmp(argv[1],"--app-ui")==0;
     SetEnvironmentVariableW(L"MYIME_DIAGNOSTICS",L"1");
     if (FAILED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED))) return 1;
     HMODULE dll=LoadLibraryW(L"myime_host.dll"); if (!dll) return 2;
@@ -17,6 +20,10 @@ int main(int argc,char**) {
         std::printf("Activate thread: %08lx client=%lu\n",hr,client);
         ComPtr<ITfDocumentMgr> document; if (SUCCEEDED(hr)) hr=manager->CreateDocumentMgr(&document);
         ComPtr<TextStore> store; store.Attach(new TextStore);
+        store->window=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,L"STATIC",L"MYIME regression document",
+            WS_POPUP,40,40,400,120,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+        if (!store->window) hr=HRESULT_FROM_WIN32(GetLastError());
+        else ShowWindow(store->window,SW_SHOWNOACTIVATE);
         ComPtr<ITfContext> context; TfEditCookie cookie=0;
         if (SUCCEEDED(hr)) hr=document->CreateContext(client,0,static_cast<ITextStoreACP*>(store.Get()),&context,&cookie);
         std::printf("Create context: %08lx\n",hr);
@@ -26,7 +33,16 @@ int main(int argc,char**) {
         ComPtr<IClassFactory> factory; if (SUCCEEDED(hr)) hr=create(kService,IID_PPV_ARGS(&factory));
         ComPtr<ITfTextInputProcessorEx> service; if (SUCCEEDED(hr)) hr=factory->CreateInstance(nullptr,IID_PPV_ARGS(&service));
         ComPtr<ManualDispatch> dispatch; dispatch.Attach(new ManualDispatch(manager.Get()));
-        if (SUCCEEDED(hr)) hr=service->ActivateEx(dispatch.Get(),client,0);
+        ComPtr<ITfUIElementMgr> ui; ComPtr<ITfSource> source;
+        ComPtr<UiObserver> observer; DWORD observer_cookie=TF_INVALID_COOKIE;
+        if (SUCCEEDED(hr)) hr=manager.As(&ui);
+        if (SUCCEEDED(hr)) hr=manager.As(&source);
+        if (SUCCEEDED(hr)) {
+            observer.Attach(new UiObserver(ui.Get())); observer->allow_host=app_draws?FALSE:TRUE;
+            hr=source->AdviseSink(IID_ITfUIElementSink,observer.Get(),&observer_cookie);
+        }
+        // UI-less-capable activation must still honor the application's pbShow.
+        if (SUCCEEDED(hr)) hr=service->ActivateEx(dispatch.Get(),client,TF_TMAE_UIELEMENTENABLEDONLY);
         std::printf("TSF activation: 0x%08lx\n",static_cast<unsigned long>(hr));
         ComPtr<ITfKeyEventSink> keys; if (SUCCEEDED(hr)) hr=service.As(&keys);
         passed=SUCCEEDED(hr);
@@ -42,6 +58,12 @@ int main(int argc,char**) {
                 keys->OnKeyUp(context.Get(),key,0,&eaten);
             }
             passed &= store->starts==1 && store->ends==0 && !store->text.empty();
+            passed &= observer->begins==1 && observer->ends==0 && observer->updates>=5 && observer->valid;
+            std::printf("Persistent candidate UI: begins=%d updates=%d ends=%d valid=%d\n",
+                observer->begins,observer->updates,observer->ends,observer->valid);
+            BOOL shown=FALSE;
+            passed &= observer->current && observer->current->IsShown(&shown)==S_OK && shown==!app_draws;
+            std::printf("Candidate host visibility: actual=%d expected=%d\n",shown,!app_draws);
             BOOL eaten=FALSE; keys->OnKeyDown(context.Get(),VK_SPACE,0,&eaten);
             passed &= eaten!=FALSE && store->text==L"你好" && store->ends==1;
             std::printf("TSF document commit: %s; starts=%d ends=%d\n",store->text==L"你好"?"PASS":"FAIL",store->starts,store->ends);
@@ -77,9 +99,12 @@ int main(int argc,char**) {
             passed &= before_refs==after_refs && end_refs==after_refs;
             }
             service->Deactivate();
+            passed &= observer->valid && observer->begins==observer->ends;
         }
+        if (source && observer_cookie!=TF_INVALID_COOKIE) source->UnadviseSink(observer_cookie);
         if (document) document->Pop(TF_POPF_ALL);
         if (manager) manager->Deactivate();
+        if (store->window) { DestroyWindow(store->window); store->window=nullptr; }
     }
     // TSF may defer releasing rejected composition objects to its message queue.
     MSG msg{}; while (PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }

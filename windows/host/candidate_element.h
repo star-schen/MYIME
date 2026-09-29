@@ -11,14 +11,24 @@ class CandidateElement final : public ITfCandidateListUIElementBehavior {
 public:
     using Action=HRESULT(*)(void*,int,unsigned long long);
     using Visibility=void(*)(void*,BOOL);
+    using VisibilityQuery=BOOL(*)(void*);
     CandidateElement(ITfDocumentMgr* document,std::vector<std::wstring> words,UINT selection,
-        void* owner,Action action,Visibility visibility,unsigned long long generation,bool can_show)
+        void* owner,Action action,Visibility visibility,unsigned long long generation,VisibilityQuery visible)
         :document_(document),words_(std::move(words)),selection_(selection),owner_(owner),
-         action_(action),visibility_(visibility),generation_(generation),can_show_(can_show) { InterlockedIncrement(&g_objects); }
+         action_(action),visibility_(visibility),generation_(generation),visible_(visible) { InterlockedIncrement(&g_objects); }
     ~CandidateElement() { InterlockedDecrement(&g_objects); }
     void detach() noexcept { owner_=nullptr; action_=nullptr; visibility_=nullptr; shown_=FALSE; document_.Reset(); }
     bool shown() const noexcept { return shown_!=FALSE; }
     void initial_visibility(BOOL show) noexcept { shown_=show; }
+    void update(std::vector<std::wstring> words,UINT selection,unsigned long long generation) {
+        updated_=0;
+        if (words_.size()!=words.size()) updated_|=TF_CLUIE_COUNT|TF_CLUIE_PAGEINDEX;
+        if (words_!=words) updated_|=TF_CLUIE_STRING;
+        if (selection_!=selection) updated_|=TF_CLUIE_SELECTION;
+        words_=std::move(words); selection_=selection; generation_=generation;
+        // A selection requested before this update cannot finalize another page.
+        // New SetSelection calls always refer to this current snapshot.
+    }
     STDMETHODIMP QueryInterface(REFIID iid,void** out) override {
         if (!out) return E_POINTER; *out=nullptr;
         if (iid!=IID_IUnknown && iid!=IID_ITfUIElement && iid!=IID_ITfCandidateListUIElement && iid!=IID_ITfCandidateListUIElementBehavior) return E_NOINTERFACE;
@@ -31,12 +41,17 @@ public:
     STDMETHODIMP Show(BOOL show) override {
         if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
         if (!owner_) return S_FALSE;
-        shown_=can_show_?show:FALSE; visibility_(owner_,shown_); return S_OK;
+        shown_=show; visibility_(owner_,shown_); return S_OK;
     }
-    STDMETHODIMP IsShown(BOOL* value) override { if (!value) return E_POINTER; *value=shown_; return S_OK; }
+    STDMETHODIMP IsShown(BOOL* value) override {
+        if (!value) return E_POINTER; *value=FALSE;
+        if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
+        if (owner_ && visible_) *value=visible_(owner_);
+        return S_OK;
+    }
     STDMETHODIMP GetUpdatedFlags(DWORD* value) override {
         if (!value) return E_POINTER;
-        *value=TF_CLUIE_DOCUMENTMGR|TF_CLUIE_COUNT|TF_CLUIE_SELECTION|TF_CLUIE_STRING|TF_CLUIE_PAGEINDEX|TF_CLUIE_CURRENTPAGE; return S_OK;
+        *value=updated_; return S_OK;
     }
     STDMETHODIMP GetDocumentMgr(ITfDocumentMgr** value) override { if (!value) return E_POINTER; return document_.CopyTo(value); }
     STDMETHODIMP GetCount(UINT* value) override { if (!value) return E_POINTER; *value=static_cast<UINT>(words_.size()); return S_OK; }
@@ -63,9 +78,13 @@ public:
         if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
         if (!owner_) return S_FALSE;
         if (index>=words_.size()) return E_INVALIDARG;
-        selection_=index; return S_OK; // Pending application selection, committed by Finalize.
+        selection_=index; selected_generation_=generation_; selection_pending_=true;
+        return S_OK; // Pending application selection, committed by Finalize.
     }
-    STDMETHODIMP Finalize() override { return invoke(static_cast<int>(selection_)); }
+    STDMETHODIMP Finalize() override {
+        if (selection_pending_ && selected_generation_!=generation_) return S_FALSE;
+        return invoke(static_cast<int>(selection_));
+    }
     STDMETHODIMP Abort() override { return invoke(-5); }
 private:
     long refs_=1;
@@ -78,7 +97,10 @@ private:
     Visibility visibility_=nullptr;
     unsigned long long generation_=0;
     BOOL shown_=FALSE;
-    bool can_show_=true;
+    VisibilityQuery visible_=nullptr;
+    bool selection_pending_=false;
+    unsigned long long selected_generation_=0;
+    DWORD updated_=TF_CLUIE_DOCUMENTMGR|TF_CLUIE_COUNT|TF_CLUIE_SELECTION|TF_CLUIE_STRING|TF_CLUIE_PAGEINDEX|TF_CLUIE_CURRENTPAGE;
     HRESULT invoke(int action) {
         if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
         return owner_ && action_ ? action_(owner_,action,generation_) : S_FALSE;

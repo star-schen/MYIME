@@ -14,8 +14,12 @@ if ($LASTEXITCODE) { throw 'C ABI / librime integration failed' }
 if ($LASTEXITCODE) { throw 'COM lifetime test failed' }
 & "$root/build/$Configuration/myime-candidate-probe.exe"
 if ($LASTEXITCODE) { throw 'Candidate snapshot/lifetime test failed' }
+& "$root/build/$Configuration/myime-mode-probe.exe"
+if ($LASTEXITCODE) { throw 'Mode icon/menu/notifications test failed' }
 & "$root/build/$Configuration/myime-tsf-probe.exe"
 if ($LASTEXITCODE) { throw 'TSF document test failed' }
+& "$root/build/$Configuration/myime-tsf-probe.exe" --app-ui
+if ($LASTEXITCODE) { throw 'TSF application candidate UI test failed' }
 & "$root/build/$Configuration/myime-tsf-probe.exe" --reject
 if ($LASTEXITCODE) { throw 'TSF rejection isolation failed' }
 & "$root/build/$Configuration/myime-compat.exe" --self-check

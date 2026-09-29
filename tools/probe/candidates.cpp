@@ -9,12 +9,13 @@ HRESULT action(void* owner,int index,unsigned long long generation) {
     ++calls.count; calls.action=index; calls.generation=generation; return S_OK;
 }
 void visible(void* owner,BOOL show) { static_cast<Calls*>(owner)->visible=show; }
+BOOL is_visible(void* owner) { return static_cast<Calls*>(owner)->visible; }
 }
 int main() {
     // Pure protocol/lifetime regression. No installed TIP, input injection,
     // game process, Rime userdb or UI automation is involved.
     bool passed=true; Calls calls;
-    auto element=new CandidateElement(nullptr,{L"你好",L"您好"},0,&calls,action,visible,42,false);
+    auto element=new CandidateElement(nullptr,{L"你好",L"您好"},0,&calls,action,visible,42,is_visible);
     UINT count=0,page=9,start=9,selection=9;
     passed &= element->GetCount(&count)==S_OK && count==2;
     passed &= element->GetCurrentPage(&page)==S_OK && page==0;
@@ -25,7 +26,14 @@ int main() {
     passed &= element->SetSelection(1)==S_OK && calls.count==0;
     passed &= element->GetSelection(&selection)==S_OK && selection==1;
     passed &= element->Finalize()==S_OK && calls.action==1 && calls.generation==42;
-    passed &= element->Show(TRUE)==S_OK && calls.visible==FALSE; // UI-less cannot show a host window.
+    passed &= element->Show(TRUE)==S_OK && calls.visible==TRUE;
+    BOOL shown=FALSE;
+    passed &= element->IsShown(&shown)==S_OK && shown;
+    passed &= element->Show(FALSE)==S_OK && calls.visible==FALSE;
+    element->update({L"你好",L"您好"},0,43);
+    const int selected_before=calls.count;
+    passed &= element->Finalize()==S_FALSE && calls.count==selected_before;
+    passed &= element->SetSelection(0)==S_OK && element->Finalize()==S_OK && calls.generation==43;
     passed &= element->Abort()==S_OK && calls.action==-5;
     const int before=calls.count;
     element->detach(); // Simulates page change, focus change or service teardown.

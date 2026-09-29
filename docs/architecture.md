@@ -46,11 +46,11 @@ TSF 要求写操作位于 read/write edit session。`OnTestKeyDown/Up` 不改变
 
 ### 应用自绘候选与 Host 窗口并存
 
-application-rendered UI 通过 `ITfUIElementMgr` 与 `ITfCandidateListUIElementBehavior` 协商；遵守 `BeginUIElement` 的 `pbShow`，UI-less 激活不显示自有窗口。每次引擎状态变化都会结束旧候选对象、发布新快照，旧对象保留查询内容但禁用操作，不持有服务引用。异步选词同时校验 context 和 generation。[官方 UI-less 说明](https://learn.microsoft.com/en-us/windows/win32/tsf/uiless-mode-overview)
+application-rendered UI 通过 `ITfUIElementMgr` 与 `ITfCandidateListUIElementBehavior` 协商；遵守 `BeginUIElement` 的 `pbShow`，包括 UI-less 激活下应用允许 Host 自绘的情况。一次候选会话只 Begin 一次，后续按键和翻页更新同一对象拥有的字符串快照；结束、失焦或停用时先禁用回调再 End。异步选词校验 context 和 generation；SetSelection 后发生状态更新则拒绝旧 Finalize，应用须重新选择。[官方 UI-less 说明](https://learn.microsoft.com/en-us/windows/win32/tsf/uiless-mode-overview)
 
 当前 Core ABI 只有 Rime 当前页，并无整个候选列表。因此每个 UI Element 是单页局部快照：count 等于当前页候选数，page index 为 `[0]`，current page 为 0。不会伪造全局总数或填充不存在的候选。Rime 的真实页码仍用于 Host 窗口显示；PgUp/PgDn 仍交给 Rime，再发布新的页快照。SetPageIndex 只接受这个单页边界，不允许应用的 7/9 行布局改变引擎分页。跨页随机访问、集成搜索建议接口尚未实现，须明确区分基本 UI-less 支持与完整搜索集成。
 
-在应用自绘候选时 SetSelection 记录该快照的待提交项，Finalize 通过 Core 的 page-local select 提交；不会改写 Rime 候选排序或词频。Abort 通过 edit session 清空组合。基础模式/触摸键盘通过 ITfFunctionProvider 提供经典键盘布局，未声明安全桌面或输入模式 compartment 支持。
+在应用自绘候选时 SetSelection 记录该快照的待提交项，Finalize 通过 Core 的 page-local select 提交；不会改写 Rime 候选排序或词频。Abort 通过 edit session 清空组合。ITfFunctionProvider 提供经典触摸键盘布局。Host 将 Core 的中英文/全角状态发布到 TSF conversion compartment，保留其余标志；这不是双向模式控制，未注册 INPUTMODECOMPARTMENT 或安全桌面能力。
 
 受限应用的身份由有效令牌确定：AppContainer 使用系统 GetAppContainerFolderPath 返回目录，普通应用使用 FOLDERID_LocalAppData，各自在其下使用 MYIME/rime/slots。只读词库来自 Program Files 的预部署数据。不会扩大用户词库 ACL、复制 live userdb 或在输入路径部署。受限环境的学习与配置独立，尚未合并；目录不可写时激活失败并记录阶段。[系统目录接口](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-getappcontainerfolderpath)
 

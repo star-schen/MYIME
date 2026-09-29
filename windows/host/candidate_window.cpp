@@ -21,14 +21,17 @@ void CandidateWindow::destroy() {
 }
 void CandidateWindow::update(Engine& engine, const MyimeState& state, RECT caret) {
     if (!state.active) { hide(); return; }
-    rows_.clear(); selected_=state.selected;
-    header_=wide(state.preedit);
+    last_caret_=caret;
+    std::vector<std::wstring> rows;
+    auto header=wide(state.preedit);
     for (size_t i=0;i<state.count;++i) {
         MyimeCandidate c{};
         if (engine.candidate(engine.handle,i,&c)) throw std::runtime_error(engine.last_error());
-        rows_.push_back(wide(c.label)+L"  "+wide(c.text)+L"  "+wide(c.comment));
+        rows.push_back(wide(c.label)+L"  "+wide(c.text)+L"  "+wide(c.comment));
     }
-    footer_=L"◀  PgUp      "+std::to_wstring(state.page+1)+L"      PgDn  ▶";
+    auto footer=L"◀  PgUp      "+std::to_wstring(state.page+1)+L"      PgDn  ▶";
+    const bool changed=rows!=rows_ || header!=header_ || footer!=footer_ || selected_!=state.selected;
+    rows_=std::move(rows); header_=std::move(header); footer_=std::move(footer); selected_=state.selected;
     HDC dc=GetDC(window_); auto old=SelectObject(dc,font_);
     width_=300;
     for (const auto& row: rows_) { SIZE s{}; GetTextExtentPoint32W(dc,row.data(),static_cast<int>(row.size()),&s); width_=std::max(width_,static_cast<int>(s.cx)+2*theme_.padding); }
@@ -40,9 +43,13 @@ void CandidateWindow::update(Engine& engine, const MyimeState& state, RECT caret
     int y=caret.bottom;
     if (y+height>info.rcWork.bottom) y=std::max(static_cast<int>(info.rcWork.top),static_cast<int>(caret.top)-height);
     const bool visible=IsWindowVisible(window_)!=FALSE;
-    SetWindowPos(window_,HWND_TOPMOST,x,y,width_,height,SWP_NOACTIVATE|SWP_SHOWWINDOW);
-    NotifyWinEvent(visible?EVENT_OBJECT_IME_CHANGE:EVENT_OBJECT_IME_SHOW,window_,OBJID_CLIENT,CHILDID_SELF);
-    InvalidateRect(window_,nullptr,FALSE);
+    RECT previous{}; GetWindowRect(window_,&previous);
+    const bool moved=previous.left!=x || previous.top!=y || previous.right-previous.left!=width_ || previous.bottom-previous.top!=height;
+    if (!visible || moved) {
+        SetWindowPos(window_,HWND_TOPMOST,x,y,width_,height,SWP_NOACTIVATE|(visible?0:SWP_SHOWWINDOW));
+        NotifyWinEvent(visible?EVENT_OBJECT_IME_CHANGE:EVENT_OBJECT_IME_SHOW,window_,OBJID_CLIENT,CHILDID_SELF);
+    }
+    if (!visible || moved || changed) InvalidateRect(window_,nullptr,FALSE);
 }
 LRESULT CALLBACK CandidateWindow::procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
     auto self=reinterpret_cast<CandidateWindow*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
@@ -62,7 +69,11 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l
         return 0;
     }
     if (msg==WM_PAINT) {
-        PAINTSTRUCT ps; HDC dc=BeginPaint(hwnd,&ps); RECT bounds; GetClientRect(hwnd,&bounds);
+        PAINTSTRUCT ps; HDC screen=BeginPaint(hwnd,&ps); RECT bounds; GetClientRect(hwnd,&bounds);
+        HDC buffer=CreateCompatibleDC(screen);
+        HBITMAP bitmap=buffer?CreateCompatibleBitmap(screen,bounds.right,bounds.bottom):nullptr;
+        HGDIOBJ previous=bitmap?SelectObject(buffer,bitmap):nullptr;
+        HDC dc=bitmap?buffer:screen;
         HBRUSH bg=CreateSolidBrush(self->theme_.background); FillRect(dc,&bounds,bg); DeleteObject(bg);
         auto old=SelectObject(dc,self->font_); SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(25,25,25));
         auto draw=[&](const std::wstring& text,int row,bool selected) {
@@ -74,7 +85,13 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l
         draw(self->header_,0,false);
         for (size_t i=0;i<self->rows_.size();++i) draw(self->rows_[i],static_cast<int>(i+1),i==self->selected_);
         draw(self->footer_,static_cast<int>(self->rows_.size()+1),false);
-        SelectObject(dc,old); EndPaint(hwnd,&ps); return 0;
+        SelectObject(dc,old);
+        if (bitmap) {
+            BitBlt(screen,0,0,bounds.right,bounds.bottom,buffer,0,0,SRCCOPY);
+            SelectObject(buffer,previous); DeleteObject(bitmap);
+        }
+        if (buffer) DeleteDC(buffer);
+        EndPaint(hwnd,&ps); return 0;
     }
     return DefWindowProcW(hwnd,msg,w,l);
 }

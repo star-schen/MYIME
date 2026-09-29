@@ -52,11 +52,11 @@ private:
     bool faulted_=false;
     bool key_sink_advised_=false;
     bool function_advised_=false;
-    bool force_uiless_=false;
     ComPtr<ITfLangBarItemMgr> language_bar_;
     ComPtr<ModeIndicator> mode_indicator_;
     bool mode_added_=false;
     void update_mode();
+    static HWND mode_owner(void*);
     ComPtr<ITfUIElementMgr> ui_manager_;
     ComPtr<CandidateElement> candidate_element_;
     DWORD element_id_=0;
@@ -66,6 +66,7 @@ private:
     HRESULT publish_candidates(const MyimeState&);
     static HRESULT candidate_action(void*,int,unsigned long long);
     static void candidate_visibility(void*,BOOL);
+    static BOOL candidate_is_visible(void*);
     Diagnostics diagnostics_;
     void log_failure(const char* message);
     unsigned long long generation_=0;

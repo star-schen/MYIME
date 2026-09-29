@@ -2,7 +2,7 @@
 
 MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Windows/COM/文本编辑和候选窗口，Rust 负责输入状态、产品配置、AppProfile 及 Rime 安全封装。按键路径全部在应用进程内，无 socket、pipe、HTTP 或设置 GUI 依赖。
 
-当前是开发版。本次兼容性与图标更新 **未编译、未运行测试、未安装**；历史 MVP 测试结果不代表新代码已通过。构建及实际应用验收由用户执行，先阅读 [本次更新与升级清单](docs/compatibility-update.md)。
+当前是开发版。2026-09-30 按用户本轮授权完成 Release 编译和回归测试，**未安装新版，未验收系统托盘、Windows 搜索或游戏**。先阅读 [候选闪烁与模式图标修复](docs/ui-regression.md) 和 [升级清单](docs/compatibility-update.md)。
 
 ## 已实现
 
@@ -20,7 +20,7 @@ MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Wi
 
 Windows 10/11 x64；Visual Studio 2022 的 **使用 C++ 的桌面开发**（MSVC x64、Windows SDK）；Rust `stable-x86_64-pc-windows-msvc`；Git。CMake 和 librime 由脚本下载到项目目录，不修改系统 PATH。
 
-历史 MVP 在本机使用 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0 完成过 Debug/Release 构建；本次修改尚未编译。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
+历史 MVP 在本机使用 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0 完成过 Debug/Release 构建；本轮 Release 构建也已通过。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
 
 在项目根目录的 PowerShell 中执行：
 
@@ -91,7 +91,7 @@ build/Release/myime-compat.exe --uiless
 
 包含普通 Windows EDIT、自绘 TSF 文档、composition 拒绝开关、TSF UI Element 候选观察，以及 7/9 个显示槽位。日志显示输入法报告的候选索引；MYIME 当前采用局部单页快照，page offset 为 0，真实翻页需对照候选内容。显示槽位数不会修改 Rime page size；不记录键入正文到文件。先设置测试选项，再聚焦文本区输入。
 
-`--uiless` 用于比较实现 UI-less 协议的输入法。本次已添加 MYIME 的 UI Element 当前页适配，但尚未运行验收；不等于已通过开始菜单或游戏测试。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。
+`--uiless` 用于比较实现 UI-less 协议的输入法。MYIME 的 UI Element 当前页适配已通过独立 TSF 回归，不等于已通过开始菜单或游戏测试。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。
 
 ## 调试与目录
 
