@@ -2,7 +2,7 @@
 
 MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Windows/COM/文本编辑和候选窗口，Rust 负责输入状态、产品配置、AppProfile 及 Rime 安全封装。按键路径全部在应用进程内，无 socket、pipe、HTTP 或设置 GUI 依赖。
 
-当前是开发版。2026-09-30 首轮 Provider 接入与 Windows 搜索候选诊断已写入源码，**本轮未编译、未运行测试、未安装、未操作界面或游戏**。同日此前 `d662451` 的构建/回归记录仅属于旧基线。用户反馈旧基线的候选闪烁已消失、模式图标正常，但开始菜单跳转搜索后无候选栏，输入仍可提交；本轮交付诊断，搜索修复待目标日志定位。参见 [架构](docs/architecture.md)、[用户验收](docs/testing.md)、[搜索采集](docs/search-candidates.md) 和 [分阶段路线](docs/roadmap.md)。
+当前是开发版。2026-09-30 按用户明确授权，首轮 Provider 接入与 Windows 搜索候选诊断已完成 **Release 编译及全部自动回归**：14 项 Rust 测试、真实 librime/C ABI、COM、候选、模式图标、TSF 和兼容程序初始化均通过。回归发现并修复了未部署 schema 仍被接受、导致 Profile 替换正常实例的问题。**未安装新版；Notepad/Edge、系统托盘和 Windows 搜索的真实交互仍待验收**。用户反馈旧版闪烁已消失、图标正常，但搜索无候选栏而可提交；搜索修复仍待目标日志定位。参见 [架构](docs/architecture.md)、[测试记录](docs/testing.md)、[搜索采集](docs/search-candidates.md) 和 [分阶段路线](docs/roadmap.md)。
 
 ## 已实现
 
@@ -21,7 +21,7 @@ MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Wi
 
 Windows 10/11 x64；Visual Studio 2022 的 **使用 C++ 的桌面开发**（MSVC x64、Windows SDK）；Rust `stable-x86_64-pc-windows-msvc`；Git。CMake 和 librime 由脚本下载到项目目录，不修改系统 PATH。
 
-历史 MVP 在本机使用 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0 完成过 Debug/Release 构建；同日旧基线也曾通过 Release 回归，本轮源码尚未构建。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
+本机工具链为 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0；历史 MVP 构建过 Debug/Release，本轮使用 Release 编译和回归。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
 
 在项目根目录的 PowerShell 中执行：
 
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-data.ps1 -Co
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Configuration Release
 ```
 
-该脚本包括构建、配置及安全 Core 合约测试、真实 librime/C ABI、COM 生命周期、真实 TSF 文档和兼容性程序初始化。本轮只编写/扩充测试源文件，未运行。TSF 测试需要交互式 Windows 用户会话；完整覆盖范围及不链接 librime 的 Core 测试命令见 [测试记录](docs/testing.md)。
+该脚本包括构建、配置及安全 Core 合约测试、真实 librime/C ABI、COM 生命周期、真实 TSF 文档和兼容性程序初始化。本轮已获授权执行且全部通过。TSF probe 自动开启当前进程的诊断日志，不安装系统 profile；需要交互式 Windows 用户会话。完整覆盖范围及不链接 librime 的 Core 测试命令见 [测试记录](docs/testing.md)。
 
 ## 打包、安装和卸载
 
@@ -92,7 +92,7 @@ build/Release/myime-compat.exe --uiless
 
 包含普通 Windows EDIT、自绘 TSF 文档、composition 拒绝开关、TSF UI Element 候选观察，以及 7/9 个显示槽位。日志显示输入法报告的候选索引；MYIME 当前采用局部单页快照，page offset 为 0，真实翻页需对照候选内容。显示槽位数不会修改 Rime page size；不记录键入正文到文件。先设置测试选项，再聚焦文本区输入。
 
-`--uiless` 用于比较实现 UI-less 协议的输入法。旧基线的 UI Element 当前页适配曾通过独立 TSF 回归；本轮改动尚未重测，不等于已通过开始菜单或游戏测试。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。
+`--uiless` 用于比较实现 UI-less 协议的输入法。本轮 UI Element 当前页适配已通过独立 TSF 回归，包括应用允许/禁止 Host 自绘；不等于已通过开始菜单或游戏测试。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。
 
 ## 调试与目录
 

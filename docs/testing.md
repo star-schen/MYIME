@@ -1,8 +1,27 @@
 # 测试状态与验收
 
-2026-09-30 当前首轮 Provider 重构与搜索候选诊断：**只编写测试源文件和文档，未编译、未运行测试/语法检查、未安装、未操作界面或游戏**。所有执行与验收由用户负责。同日此前 `d662451` 的构建/回归属于旧基线，不能用于证明当前源码通过。
+2026-09-30 用户明确授权执行测试后，当前 Provider 重构与搜索候选诊断已完成 **Release 编译和完整自动回归**，发现的问题已修正并重跑通过。未安装或替换正在使用的 DLL，未操作真实 Notepad/Edge、Windows 搜索、系统托盘或游戏。以后是否运行测试仍按协作约定与当次授权决定。
 
-## 首轮新增测试源文件（尚未执行）
+## 本轮实际结果（2026-09-30）
+
+| 范围 | 结果及证据 |
+|---|---|
+| 不链接 librime 的安全层 | `--no-default-features --lib --target-dir target/core-contract-tests`，11 项 Core + 3 项配置测试全部通过；独立 target 目录不覆盖产品 DLL |
+| Release 工程与生产测试 | Rust/MSVC/CMake 编译成功；默认 rime feature 下同样 14 项测试通过，doctest 0 项 |
+| C ABI / 真实 librime | nihao → 7 候选 → 你好；分页、commit 确认、非法选词、Profile 原子替换、跨线程拒绝、多个 session 与重新初始化全部通过 |
+| COM / 候选 / 模式接口 | factory/生命周期、快照/过期操作、图标资源/菜单/通知全部通过 |
+| 真实 TSF 文档 | 普通、`--app-ui`、`--reject` 三种模式全部通过；试探回调不改状态，中文提交、只读、取消和应用结束/拒绝 composition 符合断言 |
+| 候选显示协商 | 同一会话 Begin 1 次、Update 10 次、提交前 End 0 次；pbShow=1 时 HWND 可见，pbShow=0 时隐藏 |
+| 启用诊断的 TSF 路径 | probe 已自动设置 MYIME_DIAGNOSTICS=1；日志含 Begin/pbShow、context、owner、caret HRESULT、实际 visible、End 及 suppressed，未发现输入正文 |
+| 兼容程序 | `--self-check` 初始化通过；未执行真实输入法对比 |
+
+首次完整回归在 C ABI 阶段失败：不存在的 schema 被接受，正常 Provider 被替换，后续候选数为 0。官方 [RimeSelectSchema 实现](https://github.com/rime/librime/blob/1.17.0/src/rime_api_impl.h) 只确认 session/id 参数，不证明配置已部署；[配置组件](https://github.com/rime/librime/blob/1.17.0/src/rime/config/config_component.cc) 也可能为不存在的文件返回空 Config。现在用官方配置 API 检查 schema/schema_id 和非空 engine/processors，再创建/选择 session。失败保留原 Provider；未改变 Host/Core ABI 或原生 YAML。修正后完整脚本退出码为 0。
+
+TSF probe 的拒绝组合分支 DllCanUnloadNow=S_FALSE，服务引用在拒绝前后均为 8；这是既有 Windows sink 保留行为。正常与应用自绘分支均为 S_OK。测试使用独立进程和真实 Windows 文档，手动分发按键；不覆盖系统注册/真实键盘路由、Search 像素或鼠标操作。
+
+本轮 C ABI probe 使用仓库 runtime 测试数据和临时 TOML。TSF probe 沿用 Host 的普通身份数据目录/槽位租约，不删除或重置已有配置、词库；日志在普通 MYIME 日志目录。自动回归的 HWND 可见性结论不能替代实际应用界面验收。
+
+## 首轮新增测试覆盖（已执行）
 
 `crates/core/src/core/tests.rs` 包含 11 项安全 Core 合约测试，测试工厂/Provider 仅在 cfg(test) 中出现，不创建 Rime session：
 
@@ -17,12 +36,12 @@
 
 Mock 合约测试不覆盖 librime 原生行为、原生 runtime mutex/引用计数实际运行、Windows COM/TSF 或真实键盘路由。既有候选、模式图标和 TSF probe 保留，真实回归与桌面端到端验收仍必须独立进行。
 
-## 用户执行命令（本轮没有执行）
+## 重复运行命令
 
 在已有 Rust/MSVC 工具链的 x64 开发 PowerShell 中，从仓库根目录先运行安全 Core 与配置测试：
 
 ```powershell
-cargo test -p myime-core --locked --no-default-features --lib
+cargo test -p myime-core --locked --no-default-features --lib --target-dir target/core-contract-tests
 ```
 
 该模式不编译 native bridge、不链接/加载 librime，不需要准备 Rime 数据；`--lib` 只用于安全层测试。不要用关闭默认 feature 的产物替换产品 DLL：生产构建必须保留默认 `rime` feature 和 C ABI。
@@ -33,7 +52,7 @@ cargo test -p myime-core --locked --no-default-features --lib
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Configuration Release
 ```
 
-此命令不会安装输入法。构建/回归成功后由用户自行决定安装诊断版，再按下文手工清单和 [Windows 搜索最小采集步骤](search-candidates.md) 反馈结果。本轮没有桌面、Search、游戏通过结论。
+两条命令本轮均已执行并通过。完整脚本不会安装输入法。Release 包位于 out/MYIME-Release，用户可用 Install-MYIME.cmd 的选项 2 升级，再按下文手工清单和 [Windows 搜索最小采集步骤](search-candidates.md) 反馈结果。本轮没有真实桌面、Search 或游戏通过结论。
 
 ## 旧基线已运行（2026-09-30，d662451）
 
@@ -70,7 +89,6 @@ TSF probe 的 `ManualDispatch` 只替换键盘 sink 注册，测试自己调用�
 
 ## 当前尚未运行
 
-- 本轮源码编译、11 项安全 Core 测试、扩充后的真实 C ABI/Rime probe，以及全部 Host/TSF 回归。
 - 本轮新版安装/卸载和输入法列表可见性。
 - Notepad、Edge 普通文本框真实按键、鼠标点击与可视布局验收。
 - 微软拼音/百度/Weasel 对比，尤其《战舰世界》。
@@ -80,6 +98,8 @@ TSF probe 的 `ManualDispatch` 只替换键盘 sink 注册，测试自己调用�
 用户最新反馈旧基线候选不再闪烁、模式图标正常；游戏能正常启动；开始菜单跳转搜索后没有候选栏，但 nihao + 空格能提交“你好”。这些反馈不是本轮源码的测试结果，也不能证明搜索根因或游戏白名单假设。
 
 ## 安装后手工清单
+
+本轮用户最小验收只需：使用已准备的 Release 包升级，保存工作后注销/登录；Notepad 或 Edge 输入 nihao、翻页/选词/标点并切换窗口；重点在开始菜单跳转搜索后观察候选和提交，按搜索文档采集目标日志。系统托盘菜单/位置、真实 caret、多屏和搜索遮挡必须在实际桌面观察。游戏专项暂不纳入本轮。
 
 1. Release 构建、部署数据、打包；在管理员 PowerShell 执行 install.ps1。确认 Win+Space/语言设置可选择 MYIME Rime。
 2. Notepad 输入 nihao，检查 composition 只出现一次、caret 位置正确、空格提交“你好”；继续输入检查上一次 commit 不重复。

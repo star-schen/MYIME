@@ -4,7 +4,7 @@
 
 以下修复与已运行结果属于此前 `d662451` 基线。用户最新反馈候选闪烁已不存在、模式图标正常；开始菜单跳转 Windows 搜索后候选栏不显示，但 nihao + 空格可以提交“你好”。游戏已经能启动，输入限制的白名单判断尚未核实。
 
-当前首轮在保留该候选会话生命周期和中/A 图标行为的基础上补充无正文诊断，没有目标进程日志，不宣称搜索已修复。本轮未编译、未运行测试、未安装、未操作界面。诊断字段与最小采集步骤见 [search-candidates.md](search-candidates.md)，源码级 Provider 改动见 [architecture.md](architecture.md)。
+当前首轮在保留该候选会话生命周期和中/A 图标行为的基础上补充无正文诊断；Release 编译及全部自动回归已按用户授权通过，包括诊断开启的独立 TSF 文档。没有搜索目标进程日志，不宣称搜索已修复；未安装或操作实际搜索/托盘。诊断字段与最小采集步骤见 [search-candidates.md](search-candidates.md)，源码级 Provider 改动见 [architecture.md](architecture.md)。
 
 ## 已定位的代码问题
 
@@ -22,7 +22,7 @@
 
 ## 测试与升级
 
-旧基线曾按当时授权执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Configuration Release`，构建和全部回归通过，详细范围见 [测试记录](testing.md)。旧测试中真实候选 HWND 的显示协商已覆盖，但未在 Windows 搜索中操作、未观察系统托盘切换、未测试游戏；当前首轮尚未重跑。
+旧基线曾按当时授权执行完整 Release 回归；当前 Provider 重构与诊断版本也已按最新授权重跑并全部通过，详细范围见 [测试记录](testing.md)。真实测试 HWND 的显示协商已覆盖，但未操作 Windows 搜索、未观察系统托盘切换、未测试游戏。
 
 用户可运行仓库根目录 `Install-MYIME.cmd`，选择构建并安装新版；安装器按独立版本目录升级，无需先手动卸载。此轮没有自动调用安装器。安装后按提示重新登录，以使仍加载旧 DLL 的进程退出。
 

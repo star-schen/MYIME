@@ -6,7 +6,7 @@
 
 | 阶段 | 交付范围 | 验收/交接 |
 |---|---|---|
-| 1 Provider 接入 | Core 实际持有 `Box<dyn InputProvider>`；唯一生产 RimeProvider、配置工厂、原子 Profile 替换、安全 Core 状态/commit 编排、薄 C ABI；测试专用 Provider | 源码已实现，未运行测试；用户执行安全 Core 合约、真实 Rime/C ABI 与 TSF 回归，保留 ABI v1 和输入行为 |
+| 1 Provider 接入 | Core 实际持有 `Box<dyn InputProvider>`；唯一生产 RimeProvider、配置工厂、原子 Profile 替换、安全 Core 状态/commit 编排、薄 C ABI；测试专用 Provider | Release 编译、14 项 Rust 测试、真实 Rime/C ABI 与 TSF 回归已通过；修复未部署 schema 的错误接受；ABI v1 保持不变，真实桌面验收待安装 |
 | 2 候选主题数据包 | 定义主题 manifest/版本/字体/颜色/间距资源；Host 按配置加载绘制数据，配置/数据包保持单一来源 | 仅改变外观数据；候选顺序、分页和选词继续由 Rime；回退默认主题、DPI/可访问性/资源生命周期验收 |
 | 3 配置 Bridge 与独立 C# 设置 | 将 ConfigBridge 的 revision/mtime/hash、外部修改冲突与 patch 保留规则落地；独立 C# 设置进程编辑产品配置、按约定交接原生部署 | 设置进程不进入按键路径；未知 YAML/用户 patch 保留；冲突显示和部署失败可恢复；中/A 左键与菜单动作另行确定 |
 | 4 本机学习一致性、词库数据包与导入 | 基于 Rime sync export/merge 协调各持久 slot 的学习；词库 manifest+data+metadata；TXT/CSV → ImportedWord → Converter → 离线部署 | 不复制覆盖 live LevelDB；先实现可复现的本机 merge/冲突规则，再接词库包和导入；来源、编码、频次、失败回退明确 |
@@ -17,7 +17,7 @@
 
 生产调用顺序及模块责任见 [architecture.md](architecture.md)。当前可在 Rust 源码中实现 InputProvider/InputProviderFactory，再由创建路径选用工厂；C Host 仍只看到 opaque handle 与 C-compatible view。没有动态 DLL 插件发现、复杂注册框架、外部脚本输入引擎或第二个生产算法。Importer、DictionaryProvider、Converter、ConfigBridge、SyncProvider、CompatibilityProvider 仍是接口定义，没有导入/同步/设置产品实现。
 
-测试 Provider 仅在 cfg(test) 使用，不对用户提供切换开关。关闭默认 rime feature 的入口只用于安全 Core/配置测试，不构成无 Rime 的产品 DLL。当前源码的编译、所有测试和安装均待用户执行，见 [testing.md](testing.md)。
+测试 Provider 仅在 cfg(test) 使用，不对用户提供切换开关。关闭默认 rime feature 的入口只用于安全 Core/配置测试，不构成无 Rime 的产品 DLL。当前 Release 编译和完整自动回归已按用户授权完成；安装与真实桌面验收待用户操作，见 [testing.md](testing.md)。
 
 ## Windows 搜索单独诊断
 
