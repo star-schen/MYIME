@@ -1,5 +1,11 @@
 # 候选窗口和模式图标修复（2026-09-30）
 
+## 当前首轮状态
+
+以下修复与已运行结果属于此前 `d662451` 基线。用户最新反馈候选闪烁已不存在、模式图标正常；开始菜单跳转 Windows 搜索后候选栏不显示，但 nihao + 空格可以提交“你好”。游戏已经能启动，输入限制的白名单判断尚未核实。
+
+当前首轮在保留该候选会话生命周期和中/A 图标行为的基础上补充无正文诊断，没有目标进程日志，不宣称搜索已修复。本轮未编译、未运行测试、未安装、未操作界面。诊断字段与最小采集步骤见 [search-candidates.md](search-candidates.md)，源码级 Provider 改动见 [architecture.md](architecture.md)。
+
 ## 已定位的代码问题
 
 此前每次引擎状态更新都会 End/Begin 候选 UI Element，容易让应用自绘候选反复消失重建；现在同一会话只更新内容，失焦、提交、取消才结束。窗口通过内存缓冲绘制，内容和位置不变时不重绘，也不重复发出显示事件。临时 TF_E_NOLAYOUT 保留同一上下文最后的位置并更新内容，等布局通知后重新定位。
@@ -16,7 +22,7 @@
 
 ## 测试与升级
 
-按本轮明确授权执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Configuration Release`，构建和全部回归通过，详细范围见 [测试记录](testing.md)。测试中真实候选 HWND 的显示协商已覆盖，但未在 Windows 搜索中操作、未观察系统托盘切换、未测试游戏。
+旧基线曾按当时授权执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Configuration Release`，构建和全部回归通过，详细范围见 [测试记录](testing.md)。旧测试中真实候选 HWND 的显示协商已覆盖，但未在 Windows 搜索中操作、未观察系统托盘切换、未测试游戏；当前首轮尚未重跑。
 
 用户可运行仓库根目录 `Install-MYIME.cmd`，选择构建并安装新版；安装器按独立版本目录升级，无需先手动卸载。此轮没有自动调用安装器。安装后按提示重新登录，以使仍加载旧 DLL 的进程退出。
 

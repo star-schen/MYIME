@@ -2,25 +2,26 @@
 
 MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Windows/COM/文本编辑和候选窗口，Rust 负责输入状态、产品配置、AppProfile 及 Rime 安全封装。按键路径全部在应用进程内，无 socket、pipe、HTTP 或设置 GUI 依赖。
 
-当前是开发版。2026-09-30 按用户本轮授权完成 Release 编译和回归测试，**未安装新版，未验收系统托盘、Windows 搜索或游戏**。先阅读 [候选闪烁与模式图标修复](docs/ui-regression.md) 和 [升级清单](docs/compatibility-update.md)。
+当前是开发版。2026-09-30 首轮 Provider 接入与 Windows 搜索候选诊断已写入源码，**本轮未编译、未运行测试、未安装、未操作界面或游戏**。同日此前 `d662451` 的构建/回归记录仅属于旧基线。用户反馈旧基线的候选闪烁已消失、模式图标正常，但开始菜单跳转搜索后无候选栏，输入仍可提交；本轮交付诊断，搜索修复待目标日志定位。参见 [架构](docs/architecture.md)、[用户验收](docs/testing.md)、[搜索采集](docs/search-candidates.md) 和 [分阶段路线](docs/roadmap.md)。
 
 ## 已实现
 
 - x64 TSF COM DLL、注册/卸载入口、键盘 sink、焦点与 context 生命周期。
-- C++ → C ABI → Rust → librime 官方版本化 C API；没有重新实现输入算法。
+- Windows Host → C ABI v1 → 安全 Rust Core → InputProvider → RimeProvider → librime 官方版本化 C API；RimeProvider 是唯一生产输入实现，没有重新实现输入算法。
 - 官方 `pinyin_simp` schema/dictionary、Rime session、用户词库、preedit、候选分页/选词、commit。
 - TSF edit session 中的 composition/文本提交、UTF-8 caret 到 UTF-16 转换。
 - 不夺焦点的竖排候选窗口：跟随 TSF caret，键盘/鼠标选词、上一页/下一页。
-- TOML 产品配置与 EXE AppProfile，基本诊断日志。
+- TOML 产品配置与 EXE AppProfile；工厂先完成新 Provider 的配置和初始快照，成功后替换旧实例，失败保留旧实例及有效配置；组合/待确认提交期间禁止变更 Profile。
+- 搜索候选元数据诊断：显示协商、Show、上下文/HWND、caret 布局 HRESULT、实际可见性和隐藏原因，去重并限量，不记录正文。
 - UI-less 当前页候选快照、受限应用独立数据目录、空闲状态标点交给 Rime。
 - 嵌入 DLL 的 MY 品牌图标、“中 / A”模式指示及右键置灰“设置”菜单；左键切换暂未实现。
-- 兼容性测试应用，以及 Importer、SyncProvider、DictionaryProvider、InputProvider、Converter、ConfigBridge、CompatibilityProvider 接口。
+- 兼容性测试应用、测试专用 Provider；InputProvider/InputProviderFactory 已接生产链路，Importer、SyncProvider、DictionaryProvider、Converter、ConfigBridge、CompatibilityProvider 仍只是源码级接口。
 
 ## 构建环境
 
 Windows 10/11 x64；Visual Studio 2022 的 **使用 C++ 的桌面开发**（MSVC x64、Windows SDK）；Rust `stable-x86_64-pc-windows-msvc`；Git。CMake 和 librime 由脚本下载到项目目录，不修改系统 PATH。
 
-历史 MVP 在本机使用 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0 完成过 Debug/Release 构建；本轮 Release 构建也已通过。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
+历史 MVP 在本机使用 Rust 1.98.1、MSVC 19.44、SDK 10.0.26100.0、CMake 4.4.3、librime 1.17.0 完成过 Debug/Release 构建；同日旧基线也曾通过 Release 回归，本轮源码尚未构建。第三方二进制 hash 与数据 commit 固定在 `dependencies.lock.json`；Rust 依赖固定在 `Cargo.lock`。
 
 在项目根目录的 PowerShell 中执行：
 
@@ -38,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-data.ps1 -Co
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Configuration Release
 ```
 
-该脚本包括构建、3 个配置测试、真实 librime 测试、COM 生命周期测试、真实 TSF 文档测试和兼容性程序初始化。TSF 测试需要交互式 Windows 用户会话；受限沙箱中可能无法访问 COM 或用户目录。完整覆盖范围见 [测试记录](docs/testing.md)。
+该脚本包括构建、配置及安全 Core 合约测试、真实 librime/C ABI、COM 生命周期、真实 TSF 文档和兼容性程序初始化。本轮只编写/扩充测试源文件，未运行。TSF 测试需要交互式 Windows 用户会话；完整覆盖范围及不链接 librime 的 Core 测试命令见 [测试记录](docs/testing.md)。
 
 ## 打包、安装和卸载
 
@@ -91,11 +92,11 @@ build/Release/myime-compat.exe --uiless
 
 包含普通 Windows EDIT、自绘 TSF 文档、composition 拒绝开关、TSF UI Element 候选观察，以及 7/9 个显示槽位。日志显示输入法报告的候选索引；MYIME 当前采用局部单页快照，page offset 为 0，真实翻页需对照候选内容。显示槽位数不会修改 Rime page size；不记录键入正文到文件。先设置测试选项，再聚焦文本区输入。
 
-`--uiless` 用于比较实现 UI-less 协议的输入法。MYIME 的 UI Element 当前页适配已通过独立 TSF 回归，不等于已通过开始菜单或游戏测试。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。
+`--uiless` 用于比较实现 UI-less 协议的输入法。旧基线的 UI Element 当前页适配曾通过独立 TSF 回归；本轮改动尚未重测，不等于已通过开始菜单或游戏测试。IMM32 仅在测试程序中观察消息，Host 尚无 legacy IMM32 adapter。
 
 ## 调试与目录
 
-VS 附加到使用输入法的应用进程，加载 `build/Debug/myime_host.pdb`，观察 OutputDebugString 的 `MYIME:` 日志。设置目标进程环境变量 `MYIME_DIAGNOSTICS=1` 可启用 `%LOCALAPPDATA%/MYIME/logs/host-<PID>.log`；受限应用使用系统返回的自身本地目录下的 `MYIME/logs`。目标进程需重新启动并继承环境变量。每文件约 1 MiB 循环截断，不可写时仅调试输出。Rime 自身 ERROR 日志仍使用其默认位置，通常为临时目录。不记录按键/正文。
+VS 附加到使用输入法的应用进程，加载 `build/Debug/myime_host.pdb`，观察 OutputDebugString 的 `MYIME:` 日志。设置目标进程环境变量 `MYIME_DIAGNOSTICS=1` 可启用 `%LOCALAPPDATA%/MYIME/logs/host-<PID>.log`；受限应用使用系统返回的自身本地目录下的 `MYIME/logs`。目标进程需重新启动并继承环境变量。每文件约 1 MiB 循环截断，不可写时仅调试输出；新增候选诊断只有 opt-in 时启用，连续相同消息五秒内抑制、每通道每秒至多 12 条。Rime 自身 ERROR 日志仍使用其默认位置，通常为临时目录。不记录按键/正文。Windows 搜索最小采集步骤见 [搜索候选诊断](docs/search-candidates.md)。
 
 ```text
 crates/core/          Rust 状态、配置、FFI、Rime 安全封装、扩展接口
