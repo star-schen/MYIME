@@ -119,6 +119,10 @@ extern "C" {
     fn rb_key(id: usize, key: i32, mask: i32) -> i32;
     fn rb_select(id: usize, index: usize) -> i32;
     fn rb_schema(id: usize, schema: *const c_char) -> i32;
+    fn rb_schema_config(schema: *const c_char) -> *mut c_void;
+    fn rb_config_string(p: *mut c_void, key: *const c_char) -> *const c_char;
+    fn rb_config_list_size(p: *mut c_void, key: *const c_char) -> usize;
+    fn rb_free_config(p: *mut c_void);
     fn rb_option(id: usize, name: *const c_char, value: i32);
     fn rb_get_option(id: usize, name: *const c_char) -> i32;
     fn rb_clear(id: usize);
@@ -205,6 +209,29 @@ struct Session {
 impl Session {
     fn create(schema: &str) -> Result<Self, String> {
         let schema_c = CString::new(schema).map_err(|e| e.to_string())?;
+        // select_schema accepts an unknown id and schema_open can return an
+        // empty config. Check Rime's deployed configuration before selection,
+        // so a failed profile cannot replace a working session or save a bad id.
+        unsafe {
+            struct Config(*mut c_void);
+            impl Drop for Config {
+                fn drop(&mut self) {
+                    unsafe { rb_free_config(self.0) }
+                }
+            }
+            let p = rb_schema_config(schema_c.as_ptr());
+            if p.is_null() {
+                return Err(format!("Cannot open deployed schema: {schema}"));
+            }
+            let _owner = Config(p);
+            let id = rb_config_string(p, b"schema/schema_id\0".as_ptr().cast());
+            if id.is_null() || CStr::from_ptr(id) != schema_c.as_c_str() {
+                return Err(format!("Schema is not deployed: {schema}"));
+            }
+            if rb_config_list_size(p, b"engine/processors\0".as_ptr().cast()) == 0 {
+                return Err(format!("Schema has no input processors: {schema}"));
+            }
+        }
         let id = unsafe { rb_create() };
         if id == 0 {
             return Err("Rime session creation failed; deploy data first".into());

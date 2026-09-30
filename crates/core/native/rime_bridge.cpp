@@ -38,6 +38,15 @@ void rb_destroy(uintptr_t id) { rime_get_api()->destroy_session(id); }
 int rb_key(uintptr_t id, int key, int mask) { return rime_get_api()->process_key(id, key, mask); }
 int rb_select(uintptr_t id, size_t index) { return rime_get_api()->select_candidate_on_current_page(id, index); }
 int rb_schema(uintptr_t id, const char* schema) { return rime_get_api()->select_schema(id, schema); }
+RimeConfig* rb_schema_config(const char* schema) {
+    auto p = new(std::nothrow) RimeConfig{};
+    if (!p) return nullptr;
+    if (!rime_get_api()->schema_open(schema, p)) { delete p; return nullptr; }
+    return p;
+}
+const char* rb_config_string(RimeConfig* p, const char* key) { return rime_get_api()->config_get_cstring(p, key); }
+size_t rb_config_list_size(RimeConfig* p, const char* key) { return rime_get_api()->config_list_size(p, key); }
+void rb_free_config(RimeConfig* p) { rime_get_api()->config_close(p); delete p; }
 void rb_option(uintptr_t id, const char* name, int value) { rime_get_api()->set_option(id, name, value); }
 int rb_get_option(uintptr_t id, const char* name) { return rime_get_api()->get_option(id, name); }
 void rb_clear(uintptr_t id) { rime_get_api()->clear_composition(id); }

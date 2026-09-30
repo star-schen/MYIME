@@ -7,7 +7,7 @@
 #include <thread>
 #include <filesystem>
 #include <fstream>
-// This probe is run only by the user. Temporary synthetic product config,
+// Run only with explicit test authorization. Temporary synthetic product config,
 // never an installed config or real user dictionary.
 class ProductConfigFixture {
     std::filesystem::path path_;
@@ -37,6 +37,11 @@ public:
 static bool ok(int result) {
     if (result == 0) return true;
     std::fprintf(stderr, "%s\n", myime_last_error()); return false;
+}
+static bool rejected(int result, const char* operation) {
+    if (result == -1) return true;
+    std::fprintf(stderr, "Expected rejection: %s (result=%d)\n", operation, result);
+    return false;
 }
 int wmain(int argc, wchar_t** arguments) {
     std::vector<std::string> argv;
@@ -98,14 +103,15 @@ int wmain(int argc, wchar_t** arguments) {
             passed &= ok(myime_clear(core));
             // An unavailable schema must release only the provisional session.
             enabled=99;
-            passed &= myime_apply_profile(core,"Unconfigured.exe",&enabled)==-1 && enabled==99;
-            passed &= myime_apply_profile(core,"InvalidOption.exe",&enabled)==-1 && enabled==99;
+            passed &= rejected(myime_apply_profile(core,"Unconfigured.exe",&enabled),"undeployed schema profile") && enabled==99;
+            passed &= rejected(myime_apply_profile(core,"InvalidOption.exe",&enabled),"invalid option profile") && enabled==99;
             passed &= ok(myime_state(core,&state)) && std::string(state.schema.data,state.schema.len)=="pinyin_simp";
             passed &= ok(myime_key(core,'n',0,&eaten));
             // If the last valid effective config was lost, this unchanged profile
             // would try to replace the provider during composition and fail.
             passed &= ok(myime_apply_profile(core,"Editor.exe",&enabled)) && enabled==1;
-            passed &= ok(myime_select(core,0));
+            passed &= ok(myime_state(core,&state)) && state.active && state.count>0;
+            if (state.count) passed &= ok(myime_select(core,0));
             passed &= myime_apply_profile(core,"Disabled.exe",&enabled)==-1;
             passed &= ok(myime_clear(core)); // Cancel a pending commit without ack.
             passed &= ok(myime_state(core,&state)) && state.commit.len==0;
@@ -120,7 +126,7 @@ int wmain(int argc, wchar_t** arguments) {
         passed &= wrong_destroy_rejected;
         if (!wrong_destroy_rejected) { CoUninitialize(); return 6; } // Never reuse an unexpectedly freed handle.
         MyimeCore* failed=nullptr;
-        passed &= myime_create(argv[1].c_str(),argv[2].c_str(),"myime_nonexistent_probe_schema",&failed)==-1 && !failed;
+        passed &= rejected(myime_create(argv[1].c_str(),argv[2].c_str(),"myime_nonexistent_probe_schema",&failed),"undeployed schema creation with live provider") && !failed;
         passed &= ok(myime_state(core,&state));
         // Live providers prohibit offline deployment, without finalizing them.
         passed &= myime_deploy(argv[1].c_str(),argv[2].c_str())==-1;
@@ -133,7 +139,7 @@ int wmain(int argc, wchar_t** arguments) {
         // Exercise finalization after the last provider, failed fresh creation,
         // and reinitialization in the same process.
         failed=nullptr;
-        passed &= myime_create(argv[1].c_str(),argv[2].c_str(),"myime_nonexistent_probe_schema",&failed)==-1 && !failed;
+        passed &= rejected(myime_create(argv[1].c_str(),argv[2].c_str(),"myime_nonexistent_probe_schema",&failed),"undeployed schema creation after finalization") && !failed;
         second=nullptr;
         passed &= ok(myime_create(argv[1].c_str(),argv[2].c_str(),"pinyin_simp",&second));
         if (second) passed &= ok(myime_destroy(second));
