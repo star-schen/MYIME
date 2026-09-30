@@ -41,6 +41,8 @@ public:
     STDMETHODIMP Show(BOOL show) override {
         if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
         if (!owner_) return S_FALSE;
+        // The live controller records this request and its actual HWND visibility.
+        // Detached objects never keep/use a diagnostics or service back-reference.
         shown_=show; visibility_(owner_,shown_); return S_OK;
     }
     STDMETHODIMP IsShown(BOOL* value) override {

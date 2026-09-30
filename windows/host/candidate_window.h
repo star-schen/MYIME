@@ -14,6 +14,8 @@ public:
     bool create(HINSTANCE module, void* owner, Action action);
     void destroy();
     bool created() const noexcept { return window_!=nullptr; }
+    HWND hwnd() const noexcept { return window_; }
+    HWND parent() const noexcept { return window_?reinterpret_cast<HWND>(GetWindowLongPtrW(window_,GWLP_HWNDPARENT)):nullptr; }
     BOOL visible() const noexcept { return window_ && IsWindowVisible(window_); }
     void set_parent(HWND parent) {
         if (window_ && reinterpret_cast<HWND>(GetWindowLongPtrW(window_,GWLP_HWNDPARENT))!=parent)

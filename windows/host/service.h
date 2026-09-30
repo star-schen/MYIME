@@ -68,6 +68,8 @@ private:
     static void candidate_visibility(void*,BOOL);
     static BOOL candidate_is_visible(void*);
     Diagnostics diagnostics_;
+    void candidate_visibility_event(const wchar_t*,HRESULT=S_OK);
+    void hide_candidates(const wchar_t*,HRESULT=S_OK);
     void log_failure(const char* message);
     unsigned long long generation_=0;
     bool eligible(ITfContext*,WPARAM,LPARAM);

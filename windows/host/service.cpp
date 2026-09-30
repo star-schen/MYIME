@@ -95,6 +95,18 @@ void WindowsInputAdapter::log_failure(const char* message) {
     MultiByteToWideChar(CP_UTF8,0,message,-1,text,_countof(text));
     diagnostics_.event(text,E_FAIL);
 }
+void WindowsInputAdapter::candidate_visibility_event(const wchar_t* reason,HRESULT result) {
+    if (!diagnostics_.candidate_enabled()) return;
+    wchar_t stage[512]{};
+    swprintf_s(stage,L"Candidate visibility reason=%s context=%p hwnd=%p owner=%p requested=%d visible=%d",
+        reason,static_cast<void*>(context_.Get()),static_cast<void*>(window_.hwnd()),
+        static_cast<void*>(window_.parent()),candidate_element_ && candidate_element_->shown(),window_.visible()!=FALSE);
+    diagnostics_.candidate_event(Diagnostics::CandidateChannel::Visibility,stage,result);
+}
+void WindowsInputAdapter::hide_candidates(const wchar_t* reason,HRESULT result) {
+    window_.hide();
+    candidate_visibility_event(reason,result);
+}
 HRESULT WindowsInputAdapter::QueryInterface(REFIID iid,void** out) {
     if (!out) return E_POINTER; *out=nullptr;
     if (iid==IID_IUnknown || iid==IID_ITfTextInputProcessor || iid==IID_ITfTextInputProcessorEx) *out=static_cast<ITfTextInputProcessorEx*>(this);
@@ -164,7 +176,7 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
     catch (...) { Deactivate(); return E_UNEXPECTED; }
 }
 void WindowsInputAdapter::reset() {
-    ++generation_; forwarded_.fill(false); end_candidates(); window_.hide();
+    ++generation_; forwarded_.fill(false); end_candidates(); hide_candidates(L"focus-reset");
     if (composition_ && context_) {
         auto old=composition_; composition_.Reset();
         auto cancel=new(std::nothrow) Cancel(old.Get());
@@ -176,6 +188,9 @@ void WindowsInputAdapter::reset() {
 }
 void WindowsInputAdapter::switch_context(ITfContext* c) {
     if (context_.Get()==c) return;
+    wchar_t stage[160]{};
+    swprintf_s(stage,L"Candidate context old=%p new=%p",static_cast<void*>(context_.Get()),static_cast<void*>(c));
+    diagnostics_.candidate_event(Diagnostics::CandidateChannel::Context,stage);
     reset();
     if (context_ && layout_cookie_!=TF_INVALID_COOKIE) { ComPtr<ITfSource> s; if (SUCCEEDED(context_.As(&s))) s->UnadviseSink(layout_cookie_); }
     if (context_ && edit_cookie_!=TF_INVALID_COOKIE) { ComPtr<ITfSource> s; if (SUCCEEDED(context_.As(&s))) s->UnadviseSink(edit_cookie_); }
@@ -275,13 +290,16 @@ HRESULT WindowsInputAdapter::edit(TfEditCookie ec,ITfContext* c,int action,int k
         else if (action==-5) { rc=engine_.clear(engine_.handle); handled=rc==0; }
         else rc=engine_.key(engine_.handle,key,mask,&handled);
         *eaten=handled!=0;
-        if (rc) { end_candidates(); log_failure("Core input operation failed"); return E_FAIL; }
+        if (rc) {
+            end_candidates(); candidate_visibility_event(L"core-input-failure-retain-window",E_FAIL);
+            log_failure("Core input operation failed"); return E_FAIL;
+        }
         ++generation_;
         auto hr=apply(ec,c);
         update_mode();
-        if (FAILED(hr)) { faulted_=true; end_candidates(); window_.hide(); diagnostics_.event(L"Document/UI update failed; input suspended until focus change",hr); }
+        if (FAILED(hr)) { faulted_=true; end_candidates(); hide_candidates(L"document-or-ui-failure",hr); diagnostics_.event(L"Document/UI update failed; input suspended until focus change",hr); }
         return hr;
-    } catch (...) { log_failure("Input edit exception"); faulted_=true; end_candidates(); window_.hide(); return E_FAIL; }
+    } catch (...) { log_failure("Input edit exception"); faulted_=true; end_candidates(); hide_candidates(L"edit-exception",E_FAIL); return E_FAIL; }
 }
 HRESULT WindowsInputAdapter::apply(TfEditCookie ec,ITfContext* c) {
     MyimeState s{}; if (engine_.state(engine_.handle,&s)) return E_FAIL;
@@ -305,7 +323,7 @@ HRESULT WindowsInputAdapter::apply(TfEditCookie ec,ITfContext* c) {
             ComPtr<ITfRange> r; hr=composition_->GetRange(&r); if (SUCCEEDED(hr)) hr=r->SetText(ec,0,L"",0); if (FAILED(hr)) return hr;
             auto old=composition_; composition_.Reset(); hr=old->EndComposition(ec);
         }
-        end_candidates(); window_.hide(); return hr;
+        end_candidates(); hide_candidates(L"composition-inactive",hr); return hr;
     }
     ComPtr<ITfRange> r;
     if (!composition_) {
@@ -360,31 +378,57 @@ HWND WindowsInputAdapter::mode_owner(void* owner) {
 }
 HRESULT WindowsInputAdapter::position(TfEditCookie ec,ITfContext* c) {
     MyimeState s{}; if (engine_.state(engine_.handle,&s)) return E_FAIL;
-    if (!s.active) { end_candidates(); window_.hide(); return S_OK; }
+    if (!s.active) { end_candidates(); hide_candidates(L"position-inactive"); return S_OK; }
     auto hr=publish_candidates(s); if (hr!=S_OK) return hr;
     // UIElement callbacks are external COM calls and may re-enter the service.
     if (!engine_.handle || c!=context_.Get()) return S_FALSE;
     if (engine_.state(engine_.handle,&s)) return E_FAIL;
-    if (candidate_element_ && !candidate_element_->shown()) { window_.hide(); return S_OK; }
-    ComPtr<ITfContextView> view; if (FAILED(c->GetActiveView(&view))) return S_OK;
+    if (candidate_element_ && !candidate_element_->shown()) { hide_candidates(L"host-display-not-requested"); return S_OK; }
+    ComPtr<ITfContextView> view;
+    hr=c->GetActiveView(&view);
+    if (FAILED(hr)) {
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Layout,L"Candidate GetActiveView unavailable; retain previous window",hr);
+        candidate_visibility_event(L"active-view-unavailable",hr); return S_OK;
+    }
     HWND parent=nullptr;
-    if (FAILED(view->GetWnd(&parent)) || !parent) parent=GetFocus();
-    if (!parent) { window_.hide(); return S_OK; }
+    const auto window_result=view->GetWnd(&parent);
+    const HWND view_window=parent;
+    if (FAILED(window_result) || !parent) parent=GetFocus();
+    wchar_t stage[512]{};
+    swprintf_s(stage,L"Candidate owner context=%p view=%p view_hwnd=%p resolved=%p previous=%p fallback=%d",
+        static_cast<void*>(c),static_cast<void*>(view.Get()),static_cast<void*>(view_window),
+        static_cast<void*>(parent),static_cast<void*>(window_.parent()),FAILED(window_result) || !view_window);
+    diagnostics_.candidate_event(Diagnostics::CandidateChannel::Owner,stage,window_result);
+    if (!parent) { hide_candidates(L"no-owner-hwnd",window_result); return S_OK; }
     TF_SELECTION selection{}; ULONG count=0;
-    if (FAILED(c->GetSelection(ec,TF_DEFAULT_SELECTION,1,&selection,&count)) || !count) return S_OK;
+    hr=c->GetSelection(ec,TF_DEFAULT_SELECTION,1,&selection,&count);
+    if (FAILED(hr) || !count) {
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Layout,L"Candidate GetSelection unavailable; retain previous window",hr);
+        candidate_visibility_event(L"selection-unavailable",hr); return S_OK;
+    }
     ComPtr<ITfRange> caret; caret.Attach(selection.range); RECT r{}; BOOL clipped=FALSE;
     const auto layout=view->GetTextExt(ec,caret.Get(),&r,&clipped);
+    const bool empty=!r.left && !r.right && !r.top && !r.bottom;
+    swprintf_s(stage,L"Candidate caret layout clipped=%d empty=%d",clipped!=FALSE,empty);
+    diagnostics_.candidate_event(Diagnostics::CandidateChannel::Layout,stage,layout);
     // A text change may temporarily invalidate layout. OnLayoutChange retries;
     // don't hide a valid same-context window between every character.
     if (c!=context_.Get() || !engine_.handle) return S_FALSE;
     // Layout calls may re-enter TSF; reacquire borrowed Core strings afterwards.
     if (engine_.state(engine_.handle,&s)) return E_FAIL;
-    if (!s.active) { end_candidates(); window_.hide(); return S_OK; }
-    if (candidate_element_ && !candidate_element_->shown()) { window_.hide(); return S_OK; }
-    if (layout==TF_E_NOLAYOUT) { window_.refresh(engine_,s); return S_OK; }
-    if (FAILED(layout) || clipped || (!r.left && !r.right && !r.top && !r.bottom)) { window_.hide(); return S_OK; }
-    if (!window_.created() && !window_.create(g_module,this,click)) return E_FAIL;
-    window_.set_parent(parent); window_.update(engine_,s,r); return S_OK;
+    if (!s.active) { end_candidates(); hide_candidates(L"inactive-after-layout"); return S_OK; }
+    if (candidate_element_ && !candidate_element_->shown()) { hide_candidates(L"display-revoked-after-layout"); return S_OK; }
+    if (layout==TF_E_NOLAYOUT) {
+        window_.refresh(engine_,s); candidate_visibility_event(L"no-layout-retain-same-context",layout); return S_OK;
+    }
+    if (FAILED(layout)) { hide_candidates(L"layout-failure",layout); return S_OK; }
+    if (clipped) { hide_candidates(L"caret-clipped",layout); return S_OK; }
+    if (empty) { hide_candidates(L"caret-empty",layout); return S_OK; }
+    if (!window_.created() && !window_.create(g_module,this,click)) {
+        candidate_visibility_event(L"window-create-failure",E_FAIL); return E_FAIL;
+    }
+    window_.set_parent(parent); window_.update(engine_,s,r);
+    candidate_visibility_event(L"layout-ready-update"); return S_OK;
 }
 void WindowsInputAdapter::click(void* owner,int candidate) {
     auto self=static_cast<WindowsInputAdapter*>(owner); if (!self->context_ || self->faulted_) return;
@@ -401,7 +445,7 @@ HRESULT WindowsInputAdapter::OnEndEdit(ITfContext* c,TfEditCookie,ITfEditRecord*
         if (identity.Get()==ours.Get()) return S_OK;
         view.Reset();
     }
-    composition_.Reset(); if (engine_.handle) engine_.clear(engine_.handle); ++generation_; end_candidates(); window_.hide();
+    composition_.Reset(); if (engine_.handle) engine_.clear(engine_.handle); ++generation_; end_candidates(); hide_candidates(L"application-ended-composition");
     return S_OK;
 }
 HRESULT WindowsInputAdapter::OnSetFocus(BOOL foreground) {
@@ -424,12 +468,22 @@ void WindowsInputAdapter::end_candidates() {
     if (old) old->detach();
     const bool started=element_started_; const DWORD id=element_id_;
     element_started_=false;
-    if (started && ui_manager_) ui_manager_->EndUIElement(id);
+    if (started && ui_manager_) {
+        const auto hr=ui_manager_->EndUIElement(id);
+        wchar_t stage[96]{}; swprintf_s(stage,L"Candidate EndUIElement id=%lu",id);
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Lifecycle,stage,hr);
+    }
 }
 HRESULT WindowsInputAdapter::publish_candidates(const MyimeState& state) {
-    if (!state.count) { end_candidates(); return S_OK; }
+    if (!state.count) {
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Lifecycle,L"Candidate snapshot empty; end element");
+        end_candidates(); return S_OK;
+    }
     if (element_started_ && element_generation_==generation_) return S_OK;
-    if (!ui_manager_ || !context_) return E_UNEXPECTED;
+    if (!ui_manager_ || !context_) {
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Lifecycle,L"Candidate manager/context unavailable",E_UNEXPECTED);
+        return E_UNEXPECTED;
+    }
     const auto generation=generation_;
     auto context=context_; auto manager=ui_manager_;
     std::vector<std::wstring> words; words.reserve(state.count);
@@ -440,13 +494,18 @@ HRESULT WindowsInputAdapter::publish_candidates(const MyimeState& state) {
         words.push_back(wide(candidate.text));
     }
     ComPtr<ITfDocumentMgr> document;
-    auto hr=context->GetDocumentMgr(&document); if (FAILED(hr)) return hr;
+    auto hr=context->GetDocumentMgr(&document);
+    if (FAILED(hr)) {
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Lifecycle,L"Candidate GetDocumentMgr failed",hr); return hr;
+    }
     if (generation_!=generation || context_.Get()!=context.Get() || ui_manager_.Get()!=manager.Get()) return S_FALSE;
     if (element_started_ && candidate_element_) {
         auto element=candidate_element_;
         element->update(std::move(words),selection,generation);
         element_generation_=generation;
         hr=manager->UpdateUIElement(element_id_);
+        wchar_t stage[96]{}; swprintf_s(stage,L"Candidate UpdateUIElement id=%lu",element_id_);
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Lifecycle,stage,hr);
         if (FAILED(hr)) return hr;
         return generation_==generation && candidate_element_.Get()==element.Get()?S_OK:S_FALSE;
     }
@@ -459,14 +518,21 @@ HRESULT WindowsInputAdapter::publish_candidates(const MyimeState& state) {
     ComPtr<CandidateElement> keep_alive=candidate_element_;
     BOOL show=TRUE; DWORD id=0;
     hr=manager->BeginUIElement(element,&show,&id);
+    wchar_t stage[160]{}; swprintf_s(stage,L"Candidate BeginUIElement id=%lu pbShow=%d context=%p",id,show!=FALSE,static_cast<void*>(context.Get()));
+    diagnostics_.candidate_event(Diagnostics::CandidateChannel::Negotiation,stage,hr);
     if (FAILED(hr)) { end_candidates(); return hr; }
     if (candidate_element_.Get()!=element || element_generation_!=generation_) {
-        element->detach(); manager->EndUIElement(id); return S_FALSE;
+        element->detach(); const auto ended=manager->EndUIElement(id);
+        swprintf_s(stage,L"Candidate stale Begin; EndUIElement id=%lu",id);
+        diagnostics_.candidate_event(Diagnostics::CandidateChannel::Lifecycle,stage,ended);
+        return S_FALSE;
     }
     element_id_=id; element_started_=true;
     element->initial_visibility(show);
     diagnostics_.event(show?L"Candidate UI: host draws":L"Candidate UI: application draws");
     hr=manager->UpdateUIElement(id);
+    swprintf_s(stage,L"Candidate initial UpdateUIElement id=%lu",id);
+    diagnostics_.candidate_event(Diagnostics::CandidateChannel::Lifecycle,stage,hr);
     if (FAILED(hr)) return hr;
     return generation_==generation && candidate_element_.Get()==element ? S_OK : S_FALSE;
 }
@@ -477,11 +543,18 @@ HRESULT WindowsInputAdapter::candidate_action(void* owner,int action,unsigned lo
 }
 void WindowsInputAdapter::candidate_visibility(void* owner,BOOL show) {
     auto self=static_cast<WindowsInputAdapter*>(owner);
-    if (!show) self->window_.hide();
-    else if (self->context_) self->request(self->context_.Get(),-4,0,0,false,nullptr);
+    self->diagnostics_.candidate_event(Diagnostics::CandidateChannel::Show,show?L"Candidate Show request=true":L"Candidate Show request=false");
+    if (!show) self->hide_candidates(L"Show-false");
+    else if (self->context_) {
+        const auto hr=self->request(self->context_.Get(),-4,0,0,false,nullptr);
+        self->candidate_visibility_event(L"Show-true-layout-request",hr);
+    } else self->candidate_visibility_event(L"Show-true-no-context");
 }
 BOOL WindowsInputAdapter::candidate_is_visible(void* owner) {
-    return static_cast<WindowsInputAdapter*>(owner)->window_.visible();
+    auto self=static_cast<WindowsInputAdapter*>(owner);
+    const BOOL visible=self->window_.visible();
+    self->candidate_visibility_event(L"IsShown-query");
+    return visible;
 }
 HRESULT WindowsInputAdapter::GetType(GUID* value) { if (!value) return E_POINTER; *value=kService; return S_OK; }
 HRESULT WindowsInputAdapter::GetDescription(BSTR* value) {
