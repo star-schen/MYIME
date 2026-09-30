@@ -1,5 +1,6 @@
-//! Extension contracts only; no plugin loader, worker processes or IPC.
-use crate::model::InputState;
+//! Source-level contracts; InputProvider is used by Core in production.
+//! No stable binary plugin ABI, plugin loader, worker processes or IPC.
+use crate::{config::EffectiveConfig, model::InputState};
 use std::{collections::BTreeMap, path::PathBuf};
 pub struct ImportedWord {
     pub word: String,
@@ -26,10 +27,33 @@ pub struct KeyEvent {
     pub keysym: i32,
     pub modifiers: i32,
 }
+/// A native key may already be consumed when its subsequent snapshot fails.
+/// Preserve this fact so the Host does not forward that key a second time.
+#[derive(Debug)]
+pub struct ProcessError {
+    pub message: String,
+    pub eaten: bool,
+}
+impl From<String> for ProcessError {
+    fn from(message: String) -> Self { Self { message, eaten: false } }
+}
+/// Thread-affine input session. The provider owns the sole current snapshot.
+/// Successful mutations refresh it; state() itself never consumes a commit.
+/// Keep commit text until ack_commit (successful document write) or clear
+/// (explicit cancellation). select takes a CURRENT-PAGE index.
+/// Drop must release its resources without panicking or invoking Core callbacks.
 pub trait InputProvider {
-    fn process(&mut self, key: KeyEvent) -> Result<bool, String>;
+    fn process(&mut self, key: KeyEvent) -> Result<bool, ProcessError>;
     fn state(&self) -> &InputState;
     fn select(&mut self, page_index: usize) -> Result<(), String>;
+    fn clear(&mut self) -> Result<(), String>;
+    fn ack_commit(&mut self) -> Result<(), String>;
+}
+/// Creates a configured, idle provider with its initial state already read.
+/// Failures must release provisional resources without disturbing live providers.
+/// Factories run only at creation/profile replacement, never on each key.
+pub trait InputProviderFactory {
+    fn create(&self, config: &EffectiveConfig) -> Result<Box<dyn InputProvider>, String>;
 }
 pub struct SyncObject {
     pub path: String,

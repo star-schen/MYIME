@@ -1,5 +1,8 @@
 use std::{env, path::PathBuf, process::Command};
 fn main() {
+    if env::var_os("CARGO_FEATURE_RIME").is_none() {
+        return;
+    }
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let rime = env::var_os("RIME_ROOT")
         .map(PathBuf::from)

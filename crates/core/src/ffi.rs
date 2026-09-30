@@ -1,17 +1,15 @@
 use crate::{
-    config::{Config, EffectiveConfig},
-    model::InputState,
-    rime::{Runtime, Session},
+    core::Core as InputCore,
+    extensions::KeyEvent,
+    rime::{self, RimeFactory},
 };
 use std::{
     cell::RefCell,
     ffi::{c_char, CStr, CString},
     panic::{catch_unwind, AssertUnwindSafe},
     ptr,
-    sync::Mutex,
     thread::{self, ThreadId},
 };
-static RUNTIME: Mutex<Runtime> = Mutex::new(Runtime::new());
 thread_local! { static ERROR: RefCell<CString> = RefCell::new(CString::new("").unwrap()); }
 fn boundary(f: impl FnOnce() -> Result<(), String>) -> i32 {
     match catch_unwind(AssertUnwindSafe(f)) {
@@ -34,15 +32,7 @@ unsafe fn string<'a>(p: *const c_char) -> Result<&'a str, String> {
 }
 pub struct Core {
     owner: ThreadId,
-    session: Session,
-    state: InputState,
-    config: Config,
-    effective: Option<EffectiveConfig>,
-}
-impl Core {
-    fn refresh(&mut self) -> Result<(), String> {
-        self.session.snapshot(&mut self.state)
-    }
+    inner: InputCore,
 }
 unsafe fn core<'a>(p: *mut Core) -> Result<&'a mut Core, String> {
     let c = p.as_mut().ok_or("Null handle")?;
@@ -106,47 +96,26 @@ pub unsafe extern "C" fn myime_create(
             return Err("Null output handle".into());
         }
         *out = ptr::null_mut();
-        let mut runtime = RUNTIME.lock().map_err(|_| "Rime runtime poisoned")?;
-        runtime.initialize(string(shared)?, string(user)?)?;
-        let result = (|| {
-            let mut c = Box::new(Core {
-                owner: thread::current().id(),
-                session: Session::create(string(schema)?)?,
-                state: InputState::default(),
-                config: Config::default(),
-                effective: None,
-            });
-            c.refresh()?;
-            runtime.sessions += 1;
-            *out = Box::into_raw(c);
-            Ok(())
-        })();
-        if result.is_err() {
-            runtime.finalize();
-        }
-        result
+        let factory = Box::new(RimeFactory::new(string(shared)?, string(user)?));
+        let c = Box::new(Core {
+            owner: thread::current().id(),
+            inner: InputCore::new(factory, string(schema)?)?,
+        });
+        *out = Box::into_raw(c);
+        Ok(())
     })
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_destroy(p: *mut Core) -> i32 {
     boundary(|| {
         core(p)?;
-        let mut runtime = RUNTIME.lock().map_err(|_| "Rime runtime poisoned")?;
         drop(Box::from_raw(p));
-        runtime.sessions -= 1;
-        runtime.finalize();
         Ok(())
     })
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_deploy(shared: *const c_char, user: *const c_char) -> i32 {
-    boundary(|| {
-        let mut runtime = RUNTIME.lock().map_err(|_| "Rime runtime poisoned")?;
-        runtime.initialize(string(shared)?, string(user)?)?;
-        let result = runtime.deploy();
-        runtime.finalize();
-        result
-    })
+    boundary(|| rime::deploy(string(shared)?, string(user)?))
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_key(p: *mut Core, key: i32, mask: i32, eaten: *mut u32) -> i32 {
@@ -155,54 +124,26 @@ pub unsafe extern "C" fn myime_key(p: *mut Core, key: i32, mask: i32, eaten: *mu
             return Err("Null eaten output".into());
         }
         *eaten = 0;
-        let c = core(p)?;
-        if !c.state.commit.is_empty() {
-            return Err("Acknowledge pending commit before another key".into());
-        }
-        let _runtime = RUNTIME.lock().map_err(|_| "Rime runtime poisoned")?;
-        *eaten = c.session.key(key, mask) as u32;
-        c.refresh()
+        *eaten = core(p)?.inner.process(KeyEvent { keysym: key, modifiers: mask })
+            .map_err(|error| { *eaten = error.eaten as u32; error.message })? as u32;
+        Ok(())
     })
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_select(p: *mut Core, index: usize) -> i32 {
-    boundary(|| {
-        let c = core(p)?;
-        if index >= c.state.candidates.len() || !c.state.commit.is_empty() {
-            return Err("Invalid candidate or pending commit".into());
-        }
-        let _runtime = RUNTIME.lock().map_err(|_| "Rime runtime poisoned")?;
-        if !c.session.select(index) {
-            return Err("Candidate selection failed".into());
-        }
-        c.refresh()
-    })
+    boundary(|| core(p)?.inner.select(index))
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_clear(p: *mut Core) -> i32 {
-    boundary(|| {
-        let c = core(p)?;
-        let _runtime = RUNTIME.lock().map_err(|_| "Rime runtime poisoned")?;
-        c.session.clear();
-        c.state.commit.clear();
-        c.refresh()
-    })
+    boundary(|| core(p)?.inner.clear())
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_ack_commit(p: *mut Core) -> i32 {
-    boundary(|| {
-        core(p)?.state.commit.clear();
-        Ok(())
-    })
+    boundary(|| core(p)?.inner.ack_commit())
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_load_config(p: *mut Core, path: *const c_char) -> i32 {
-    boundary(|| {
-        let c = core(p)?;
-        c.config = Config::read(std::path::Path::new(string(path)?))?;
-        c.effective = None;
-        Ok(())
-    })
+    boundary(|| core(p)?.inner.load_config(std::path::Path::new(string(path)?)))
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_apply_profile(
@@ -214,24 +155,7 @@ pub unsafe extern "C" fn myime_apply_profile(
         if enabled.is_null() {
             return Err("Null enabled output".into());
         }
-        let c = core(p)?;
-        let effective = c
-            .config
-            .effective(string(executable)?, &toml::Table::new())?;
-        if c.effective.as_ref() != Some(&effective) {
-            if c.state.active || !c.state.commit.is_empty() {
-                return Err("Finish composition before switching profile".into());
-            }
-            let _runtime = RUNTIME.lock().map_err(|_| "Rime runtime poisoned")?;
-            let session = Session::create(&effective.schema)?;
-            for (name, value) in &effective.options {
-                session.option(name, *value)?;
-            }
-            c.session = session;
-            c.refresh()?;
-        }
-        *enabled = effective.enabled as u32;
-        c.effective = Some(effective);
+        *enabled = core(p)?.inner.apply_profile(string(executable)?)? as u32;
         Ok(())
     })
 }
@@ -241,7 +165,7 @@ pub unsafe extern "C" fn myime_state(p: *mut Core, out: *mut State) -> i32 {
         if out.is_null() {
             return Err("Null state output".into());
         }
-        let s = &core(p)?.state;
+        let s = core(p)?.inner.state();
         let mut options = 0;
         for (i, name) in ["ascii_mode", "full_shape", "simplification", "ascii_punct"]
             .iter()
@@ -277,7 +201,7 @@ pub unsafe extern "C" fn myime_candidate(p: *mut Core, index: usize, out: *mut C
             return Err("Null candidate output".into());
         }
         let c = core(p)?
-            .state
+            .inner.state()
             .candidates
             .get(index)
             .ok_or("Candidate index out of range")?;

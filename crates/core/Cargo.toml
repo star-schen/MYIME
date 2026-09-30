@@ -7,5 +7,10 @@ license = "MPL-2.0"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["rime"]
+# Disable only for safe Core tests/consumers without native Rime or the C ABI.
+rime = []
+
 [dependencies]
 toml = "0.8"

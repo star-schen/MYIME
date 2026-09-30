@@ -1,6 +1,115 @@
-//! All unsafe librime calls are contained here; callers hold the process lock.
-use crate::model::{Candidate, InputState};
-use std::ffi::{c_char, c_void, CStr, CString};
+//! Rime adapter owns native sessions, the process lock and runtime leases.
+//! Session/Runtime stay private: no native call can bypass this boundary.
+use crate::{
+    config::EffectiveConfig,
+    extensions::{InputProvider, InputProviderFactory, KeyEvent, ProcessError},
+    model::{Candidate, InputState},
+};
+use std::{
+    ffi::{c_char, c_void, CStr, CString},
+    marker::PhantomData,
+    rc::Rc,
+    sync::{Mutex, MutexGuard},
+};
+static RUNTIME: Mutex<Runtime> = Mutex::new(Runtime::new());
+
+// Finalize only after all native sessions have been destroyed, including on
+// constructor/deployment failure or Rust unwind. The guard still owns the lock.
+struct RuntimeLock(MutexGuard<'static, Runtime>);
+impl Drop for RuntimeLock {
+    fn drop(&mut self) {
+        self.0.finalize();
+    }
+}
+fn lock_runtime() -> Result<RuntimeLock, String> {
+    RUNTIME.lock().map(RuntimeLock).map_err(|_| "Rime runtime poisoned".into())
+}
+
+pub struct RimeFactory {
+    shared: String,
+    user: String,
+}
+impl RimeFactory {
+    pub fn new(shared: &str, user: &str) -> Self {
+        Self { shared: shared.into(), user: user.into() }
+    }
+}
+impl InputProviderFactory for RimeFactory {
+    fn create(&self, config: &EffectiveConfig) -> Result<Box<dyn InputProvider>, String> {
+        let mut runtime = lock_runtime()?;
+        runtime.0.initialize(&self.shared, &self.user)?;
+        // Declared after the lock so failed schema/options/snapshot work destroys
+        // the provisional session before the guard finalizes/unlocks the runtime.
+        let session = Session::create(&config.schema)?;
+        for (name, value) in &config.options {
+            session.option(name, *value)?;
+        }
+        let mut state = InputState::default();
+        session.snapshot(&mut state)?;
+        runtime.0.sessions += 1;
+        Ok(Box::new(RimeProvider { session: Some(session), state, affinity: PhantomData }))
+    }
+}
+
+struct RimeProvider {
+    session: Option<Session>, // Taken in Drop while the process lock is held.
+    state: InputState,
+    affinity: PhantomData<Rc<()>>,
+}
+impl RimeProvider {
+    // Only called under RuntimeLock. Publish a complete snapshot on success;
+    // reading state never drains native commits or creates another provider.
+    fn refresh(&mut self) -> Result<(), String> {
+        let mut state = InputState { commit: self.state.commit.clone(), ..InputState::default() };
+        self.session.as_ref().unwrap().snapshot(&mut state)?;
+        self.state = state;
+        Ok(())
+    }
+}
+impl InputProvider for RimeProvider {
+    fn process(&mut self, key: KeyEvent) -> Result<bool, ProcessError> {
+        let _runtime = lock_runtime()?;
+        let eaten = self.session.as_ref().unwrap().key(key.keysym, key.modifiers);
+        self.refresh().map_err(|message| ProcessError { message, eaten })?;
+        Ok(eaten)
+    }
+    fn state(&self) -> &InputState { &self.state }
+    fn select(&mut self, page_index: usize) -> Result<(), String> {
+        let _runtime = lock_runtime()?;
+        if !self.session.as_ref().unwrap().select(page_index) {
+            return Err("Candidate selection failed".into());
+        }
+        self.refresh()
+    }
+    fn clear(&mut self) -> Result<(), String> {
+        let _runtime = lock_runtime()?;
+        self.session.as_ref().unwrap().clear();
+        self.state.commit.clear();
+        self.refresh()?;
+        // Also discard a native commit left unread by a failed earlier snapshot.
+        self.state.commit.clear();
+        Ok(())
+    }
+    fn ack_commit(&mut self) -> Result<(), String> {
+        self.state.commit.clear();
+        Ok(())
+    }
+}
+impl Drop for RimeProvider {
+    fn drop(&mut self) {
+        // Mutations reject a poisoned runtime. Cleanup must still release the
+        // session/lease after an unwind, and must never panic in Drop.
+        let mut runtime = RuntimeLock(RUNTIME.lock().unwrap_or_else(|e| e.into_inner()));
+        drop(self.session.take());
+        runtime.0.sessions -= 1;
+    }
+}
+
+pub fn deploy(shared: &str, user: &str) -> Result<(), String> {
+    let mut runtime = lock_runtime()?;
+    runtime.0.initialize(shared, user)?;
+    runtime.0.deploy()
+}
 extern "C" {
     fn rb_initialize(shared: *const c_char, user: *const c_char, first: i32) -> i32;
     fn rb_finalize();
@@ -37,14 +146,14 @@ unsafe fn text(p: *const c_char) -> String {
         CStr::from_ptr(p).to_string_lossy().into_owned()
     }
 }
-pub struct Runtime {
+struct Runtime {
     initialized: bool,
     setup: bool,
-    pub sessions: usize,
+    sessions: usize,
     paths: Option<(CString, CString)>,
 }
 impl Runtime {
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         Self {
             initialized: false,
             setup: false,
@@ -52,7 +161,7 @@ impl Runtime {
             paths: None,
         }
     }
-    pub fn initialize(&mut self, shared: &str, user: &str) -> Result<(), String> {
+    fn initialize(&mut self, shared: &str, user: &str) -> Result<(), String> {
         let paths = (
             CString::new(shared).map_err(|e| e.to_string())?,
             CString::new(user).map_err(|e| e.to_string())?,
@@ -73,7 +182,7 @@ impl Runtime {
         self.initialized = true;
         Ok(())
     }
-    pub fn deploy(&mut self) -> Result<(), String> {
+    fn deploy(&mut self) -> Result<(), String> {
         if self.sessions != 0 {
             return Err("Deployment requires an offline runtime".into());
         }
@@ -82,19 +191,19 @@ impl Runtime {
         }
         Ok(())
     }
-    pub fn finalize(&mut self) {
+    fn finalize(&mut self) {
         if self.initialized && self.sessions == 0 {
             unsafe { rb_finalize() };
             self.initialized = false;
         }
     }
 }
-pub struct Session {
+struct Session {
     id: usize,
-    pub schema: String,
+    schema: String,
 }
 impl Session {
-    pub fn create(schema: &str) -> Result<Self, String> {
+    fn create(schema: &str) -> Result<Self, String> {
         let schema_c = CString::new(schema).map_err(|e| e.to_string())?;
         let id = unsafe { rb_create() };
         if id == 0 {
@@ -110,21 +219,21 @@ impl Session {
         s.option("ascii_mode", false)?;
         Ok(s)
     }
-    pub fn key(&self, key: i32, mask: i32) -> bool {
+    fn key(&self, key: i32, mask: i32) -> bool {
         unsafe { rb_key(self.id, key, mask) != 0 }
     }
-    pub fn select(&self, index: usize) -> bool {
+    fn select(&self, index: usize) -> bool {
         unsafe { rb_select(self.id, index) != 0 }
     }
-    pub fn clear(&self) {
+    fn clear(&self) {
         unsafe { rb_clear(self.id) }
     }
-    pub fn option(&self, name: &str, value: bool) -> Result<(), String> {
+    fn option(&self, name: &str, value: bool) -> Result<(), String> {
         let name = CString::new(name).map_err(|e| e.to_string())?;
         unsafe { rb_option(self.id, name.as_ptr(), value as i32) };
         Ok(())
     }
-    pub fn snapshot(&self, state: &mut InputState) -> Result<(), String> {
+    fn snapshot(&self, state: &mut InputState) -> Result<(), String> {
         unsafe {
             struct Context(*mut c_void);
             impl Drop for Context {
