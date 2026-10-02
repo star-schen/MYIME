@@ -1,10 +1,14 @@
-# 候选主题数据包（2026-10-02）
+# 候选主题数据包与设置编辑（2026-10-03）
 
-本轮实现路线图阶段 2：TOML 主题包、产品配置选择、Windows 候选绘制和独立预览。Rust 负责解析/校验数据，Windows 负责绘制、布局、DPI 和资源；Rime 的候选内容、顺序和逻辑分页不变。没有主题 DLL、脚本或输入算法插件。
+阶段 2 提供 TOML 主题包、产品配置选择、Windows 候选绘制和独立预览；本轮阶段 3 增加独立 C# 设置中的主题选择、用户 TOML 编辑、新模板与预览入口。Rust 负责解析、校验、修订与保存，Windows 负责绘制、布局、DPI 和资源；Rime 的候选内容、顺序和逻辑分页不变。没有主题 DLL、脚本或输入算法插件。
 
 ## 直接使用
 
-已打包后可运行 `out/MYIME-Release/myime-theme-preview.exe`，无需安装输入法。选择主题，临时调整字号/横竖排；点击“重新加载”读取修改后的主题文件。预览使用与 Host 完全相同的 CandidateWindow 和示例候选；不创建 Rime session、不改产品配置或用户词库。它是阶段 2 的原生预览工具，独立 C# 设置程序仍属于阶段 3。
+已打包后运行 `out/MYIME-Release/myime-settings.exe`，在“候选主题”页选择主题，读取原文或建立灰色模板，保存到用户主题目录。字体、字号、横竖布局、颜色、间距、圆角和阴影通过该页 TOML 编辑；内置主题读出后保存为用户覆盖，不修改安装文件。保存由 Rust 校验 ID、字段范围和文件修订，外部修改会拒绝覆盖并保留编辑器草稿。
+
+点击“打开实时预览”启动 `myime-theme-preview.exe`，也可直接运行 `out/MYIME-Release/myime-theme-preview.exe`，无需安装输入法。预览选择主题、临时调整字号/横竖排，点击“重新加载”读取修改后的主题文件；编辑器未保存的内容不进入预览。它使用与 Host 同一 CandidateWindow 和示例候选，不创建 Rime session、不改产品配置或用户词库。设置通过明确的数据根和主题 ID 交给该原生工具，没有将候选绘制迁入 C#。
+
+“应用为全局默认”保存 `[default.ui].theme`；Windows 和 AppProfile 的明确覆盖仍优先。要改 Windows 覆盖可到“基础设置”选择该层；要单独改某应用，在“应用配置”选 EXE。不要把修改 Default 误认为所有覆盖层已经清除。
 
 在 `%LOCALAPPDATA%/MYIME/config.toml` 中添加或修改下列字段；已有 `[default.ui]` 时只改 theme 值，不重复添加表：
 
@@ -56,11 +60,11 @@ highlight_text = "#17171C"
 
 产品配置选 `theme = "my-gray"` 后重启目标应用。撤销时先恢复默认选择，再删除这个主题目录；不会部署 Rime、改 YAML 或删除用户词库。只更换 ui 配置时 Core 复用现有 Provider，保留组合与待确认 commit；输入配置变化仍受原有组合/commit 限制。
 
-包缺失、格式不兼容、内容损坏、目录 id 与 manifest 不一致或路径越出目录时，回退到内嵌雾灰主题，记录 Theme fallback 原因。即使安装目录的默认包损坏，仍有回退。主题选择必须是小写 ASCII 字母、数字、`-`、`_`，长度 1..64，不能用绝对/相对路径；非法产品配置按现有配置错误处理。主题文件最多 64 KiB。读入后只用内存快照，不在每次按键读取文件。
+包缺失、格式不兼容、内容损坏、目录 id 与 manifest 不一致或路径越出目录时，Host 回退到内嵌雾灰主题，记录 Theme fallback 原因；设置保存时拒绝非法内容，不将保存失败描述为已经应用。即使安装目录的默认包损坏，仍有回退。主题选择必须是小写 ASCII 字母、数字、`-`、`_`，长度 1..64，不能用绝对/相对路径；非法产品配置按现有配置错误处理。主题文件最多 64 KiB。读入后只用内存快照，不在每次按键读取文件。
 
 ## 格式和字段
 
-`format_version=1`、id、name、version 必填，description 可选。未知字段不影响当前读取；当前不写回用户文件，因此也不会覆盖扩展元数据。外观项未声明时继承仓库 `themes/default/theme.toml`；同一个文件也是 Rust 内嵌回退来源，不另维护一套 C++ 默认值。
+`format_version=1`、id、name、version 必填，description 可选。未知字段不影响绘制读取；设置编辑/保存原文，不将主题反序列化后重建成丢失扩展元数据的新文件。mtime + SHA-256 防外部修改冲突，保存产生同目录备份；新建灰色模板只在用户保存后创建文件。外观项未声明时继承仓库 `themes/default/theme.toml`；同一个文件也是 Rust 内嵌回退来源，不另维护一套 C++ 默认值。
 
 | 表 | 字段与约束 |
 |---|---|
@@ -81,12 +85,12 @@ highlight_text = "#17171C"
 
 圆角使用窗口 region；柔和阴影使用小型、透明、不接受输入的 layered HWND，通过 [UpdateLayeredWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatelayeredwindow) 更新。阴影是可选效果，创建或绘制失败只禁用效果，不阻断输入；高对比度模式使用系统颜色并隐藏阴影。没有引入 DirectX/DWM 圆角策略依赖或第三方 UI 库。
 
-字体与双缓冲位图按生命周期释放，内容/样式/可用空间未变化时复用布局，不重新绘制或重算阴影。当前还没有完整 UI Automation provider、主题 ZIP 导入、外部图片/字体打包、配置热更新或 C# 编辑器；这些应通过真实需要扩展，不在输入路径加入 GUI/IPC。
+字体与双缓冲位图按生命周期释放，内容/样式/可用空间未变化时复用布局，不重新绘制或重算阴影。C# 原文编辑器与原生预览已实现；完整 UI Automation provider、主题 ZIP 导入、外部图片/字体打包、配置热更新和可视化颜色/布局设计器仍留待后续。所有设置/预览操作在独立外围进程，不在输入路径加入 GUI/IPC。
 
 ## 代码和测试
 
 Rust `theme.rs` 是数据包规则的权威来源；`theme_ffi.rs` 只负责线程、参数、输出及生命周期。`include/myime/theme.h` 是独立 presentation ABI 1，使用 opaque handle 和固定 C 输出；借用字符串在 Host/预览中复制后立即释放句柄。Core ABI v1 保留原结构，新增只读 myime_ui_theme_id 导出；升级必须使用配套 Host/Core。
 
-`scripts/test.ps1 -Configuration Release` 包含 20 项 Rust 测试、扩充的真实 Rime/C ABI、theme probe、preview --self-check 及既有 Windows 回归。主题 probe 使用自己创建的临时目录，覆盖用户包优先/撤销、损坏/缺失回退、ABI 大小及线程、横竖排点击原 index、重复内容不绘制、40 次换主题 GDI 资源、100 候选的视口和隐藏后旧点击。示例渲染 PNG 在 `build/Release/test-artifacts/theme-*.png`，不是用户输入截图，不提交到 Git。
+`scripts/test.ps1 -Configuration Release` 包含 Rust 合约测试、真实 Rime/C ABI、theme probe、preview --self-check、设置程序 fixture 自检及既有 Windows 回归。主题 probe 使用自己创建的临时目录，覆盖用户包优先/撤销、损坏/缺失回退、ABI 大小及线程、横竖排点击原 index、重复内容不绘制、多次换主题 GDI 资源、大页候选视口和隐藏后旧点击。维护 CLI 和设置 fixture 另覆盖主题原文读写、目录 ID、修订冲突和未知元数据。示例渲染 PNG 在 `build/Release/test-artifacts/theme-*.png`；设置页示例为 `settings-*.png`，均使用测试数据，不是用户输入截图，不提交到 Git。
 
-当前自动回归和示例渲染通过；真实 Notepad/Edge、Windows 搜索、多显示器不同 DPI、高对比度及实际鼠标路由仍需安装后验收。主题实现不等于搜索候选隐藏原因已经修复。
+实际执行结果以 [testing.md](testing.md) 为准；真实 Notepad/Edge、Windows 搜索、多显示器不同 DPI、高对比度及实际鼠标路由仍需安装后验收。主题和设置实现不等于搜索候选隐藏原因已经修复，本轮不会自动安装或替换当前 DLL。

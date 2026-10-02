@@ -1,5 +1,34 @@
 # 测试状态与验收
 
+## 设置、配置 Bridge 与词库维护回归（2026-10-03）
+
+沿用用户明确授权执行测试的约定，`scripts/test.ps1 -Configuration Release` 完整运行，退出码 **0**。Rust、MSVC/CMake 和 C# Release 编译通过；本轮没有安装或替换当前 DLL，也没有操作真实 Windows 搜索或游戏。
+
+| 范围 | 实际结果 |
+|---|---|
+| 安全 Core、配置、主题、导入 | 35/35 Rust 单元测试通过；包括修订冲突、文件锁、备份、注释/未知字段保留、继承、严格 CSV、包校验、全局词库组合及错误边界 |
+| Rust 维护工具 | 4 项单元、7 项真实子进程协议测试，共 11/11；中文 CSV 往返、原文保存、Windows/Profile 覆盖和失效 schema 预检通过 |
+| C# 设置 | `/warnaserror` 编译通过；隐藏、不激活的 `--self-check` 使用独有 fixture，配置/继承/冲突/Patch/主题/导入和异步完成通过；启用方案只改 Windows 层并保留 Profile 覆盖 |
+| 六页界面 | `DrawToBitmap` 导出基础、主题、Profile、原文、Patch、导入六页 PNG，已逐页阅读；不代表真实不同缩放、多显示器或辅助技术验收 |
+| 官方 Rime 离线部署 | 两个独立中文 CSV 包先后部署；同一 `myime_global` session 实际输入两组拼音并找到对应两条候选；保留旧包、基础依赖和 9 候选 page size；Patch 原文复制一致 |
+| 发布和回退 | 损坏原生配置、包内容/hash 被改、独占部署锁、悬空 AppProfile 引用均拒绝且选择器保持；兼容配置下恢复上一代及基础数据成功 |
+| 生命周期 | 活 session 拒绝离线 `deploy_schema`；同进程两个 TSF apartment 的目录租约使用同一代际，最后一份租约释放后重新解析选择器 |
+| 输入回归 | 真实 librime/C ABI、分页、commit 确认、Profile、线程约束、COM、候选、主题布局/资源、模式菜单、预览和兼容程序初始化全部通过 |
+| 真实 TSF 文档 | 普通、应用自绘 UI、拒绝 composition 三种模式通过；Begin=1、Update=10、提交前 End=0，Host HWND 可见性与 `pbShow` 协商一致 |
+| 维护进程隔离 | PE 依赖检查确认独立 `myime-tool.exe` 不导入 `rime.dll`；构建输出使用独立 Cargo target，避免无 Rime 构建覆盖产品 Core DLL |
+
+初次回归发现 Windows PowerShell 5.1 把没有 BOM 的中文脚本按 ANSI 解释，维护测试脚本改成 ASCII 源稿、测试词按 Unicode 码点构造。首次真实部署又发现仅把 `schema_id` 写进 `__patch` 不满足官方原始 schema 预检；模板现直接声明 identity，并保留嵌套基础 metadata include 与 custom hook，重新生成包后完整回归通过。官方约束见 [librime SchemaUpdate](https://github.com/rime/librime/blob/1.17.0/src/rime/lever/deployment_tasks.cc)。
+
+新增维护测试目录为 `build/Release/test-artifacts/myime-maintenance-test-<GUID>`，只修改自己的 fixture。C# 自测自行清理其独有 fixture，截图保留在 `build/Release/test-artifacts/settings-0.png` 至 `settings-5.png`。本轮不读取或改写真实导入词库；既有 TSF probe 仍沿用普通身份数据目录租约和诊断日志，不清理用户槽位。
+
+可单独重跑维护回归（先完成匹配版本的构建和基础数据准备）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-maintenance.ps1 -Configuration Release
+```
+
+安装后仍需用户验收 Notepad/Edge、系统模式图标的设置入口、实际主题预览和保存、不同 DPI/高对比度、Windows 搜索以及游戏。**Windows 搜索候选栏仍未定位；学习槽合并、WebDAV、动态 DLL 插件未实现。**以下保留历史测试记录，历史置灰“设置”项由本轮可用的设置动作替代；受限身份或缺少程序时仍置灰。
+
 ## 最新主题回归（2026-10-02）
 
 沿用用户明确要求直接执行测试的授权，主题数据包、Windows 绘制和预览已完成 Release 编译及 `scripts/test.ps1 -Configuration Release` 全部回归，退出码 0。未安装、替换正在使用的 DLL 或操作真实搜索/游戏。
