@@ -5,6 +5,7 @@
 #include "ids.h"
 #include "engine.h"
 #include "candidate_window.h"
+#include "theme_catalog.h"
 #include "diagnostics.h"
 #include "candidate_element.h"
 #include "mode_indicator.h"
@@ -47,6 +48,10 @@ private:
     DWORD manager_cookie_=TF_INVALID_COOKIE,layout_cookie_=TF_INVALID_COOKIE;
     DWORD edit_cookie_=TF_INVALID_COOKIE;
     Engine engine_;
+    ThemeCatalog themes_;
+    CandidateTheme candidate_theme_;
+    std::wstring theme_id_;
+    void update_theme();
     CandidateWindow window_;
     std::array<bool,256> forwarded_{};
     bool faulted_=false;

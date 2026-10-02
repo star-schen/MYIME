@@ -10,6 +10,10 @@ if ($LASTEXITCODE) { throw 'Rust tests failed' }
 & "$PSScriptRoot/prepare-data.ps1" -Configuration $Configuration
 & "$root/build/$Configuration/myime-probe.exe" "$root/runtime/shared" "$root/runtime/user"
 if ($LASTEXITCODE) { throw 'C ABI / librime integration failed' }
+& "$root/build/$Configuration/myime-theme-probe.exe"
+if ($LASTEXITCODE) { throw 'Theme package/layout/resource test failed' }
+& "$root/build/$Configuration/myime-theme-preview.exe" --self-check
+if ($LASTEXITCODE) { throw 'Theme preview control initialization failed' }
 & "$root/build/$Configuration/myime-com-probe.exe"
 if ($LASTEXITCODE) { throw 'COM lifetime test failed' }
 & "$root/build/$Configuration/myime-candidate-probe.exe"

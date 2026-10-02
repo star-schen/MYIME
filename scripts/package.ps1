@@ -5,7 +5,8 @@ $source = Join-Path $root "build/$Configuration"
 $package = Join-Path $root "out/MYIME-$Configuration"
 if (!(Test-Path "$source/data/shared/build/pinyin_simp.table.bin")) { throw 'Build and prepare data first using the matching Configuration.' }
 New-Item -ItemType Directory -Force $package,"$package/notices" | Out-Null
-foreach ($file in @('myime_host.dll','myime_core.dll','rime.dll','myime-compat.exe')) { Copy-Item "$source/$file" $package -Force }
+foreach ($file in @('myime_host.dll','myime_core.dll','rime.dll','myime-compat.exe','myime-theme-preview.exe')) { Copy-Item "$source/$file" $package -Force }
+Copy-Item "$source/themes" $package -Recurse -Force
 Copy-Item "$source/data" $package -Recurse -Force
 Copy-Item "$root/LICENSE","$root/README.md","$root/THIRD_PARTY.md","$root/dependencies.lock.json" $package -Force
 Copy-Item "$root/config/product.example.toml" $package -Force

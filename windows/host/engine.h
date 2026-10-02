@@ -7,22 +7,7 @@
 #include "compatibility.h"
 #include "user_data.h"
 #include "diagnostics.h"
-inline std::wstring wide(MyimeText text) {
-    if (!text.len) return {};
-    const auto count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data,static_cast<int>(text.len),nullptr,0);
-    if (!count) throw std::runtime_error("Invalid UTF-8 from core");
-    std::wstring result(count,L'\0');
-    MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data,static_cast<int>(text.len),result.data(),count);
-    return result;
-}
-inline std::string utf8(const std::wstring& text) {
-    if (text.empty()) return {};
-    const int count=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),nullptr,0,nullptr,nullptr);
-    if (!count) throw std::runtime_error("Invalid UTF-16 path");
-    std::string result(count,'\0');
-    WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),result.data(),count,nullptr,nullptr);
-    return result;
-}
+#include "encoding.h"
 class Engine {
     HMODULE dll_=nullptr;
     UserDataLease user_data_;
@@ -31,7 +16,7 @@ public:
     bool enabled=true;
 #define API(name) decltype(&myime_##name) name=nullptr
     API(create); API(destroy); API(key); API(select); API(clear); API(state); API(candidate); API(ack_commit); API(last_error);
-    API(load_config); API(apply_profile);
+    API(load_config); API(apply_profile); API(ui_theme_id);
 #undef API
     ~Engine() { close(); }
     bool profile() {
@@ -47,7 +32,7 @@ public:
         diagnostics.module(L"myime_core.dll"); diagnostics.module(L"rime.dll");
 #define LOAD(name) name=reinterpret_cast<decltype(name)>(GetProcAddress(dll_,"myime_" #name)); if (!name) throw std::runtime_error("Core ABI export missing")
         LOAD(create); LOAD(destroy); LOAD(key); LOAD(select); LOAD(clear); LOAD(state); LOAD(candidate); LOAD(ack_commit); LOAD(last_error);
-        LOAD(load_config); LOAD(apply_profile);
+        LOAD(load_config); LOAD(apply_profile); LOAD(ui_theme_id);
 #undef LOAD
         auto abi=reinterpret_cast<decltype(&myime_abi_version)>(GetProcAddress(dll_,"myime_abi_version"));
         if (!abi || abi()!=1) throw std::runtime_error("Core ABI version mismatch");

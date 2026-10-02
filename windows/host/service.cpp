@@ -7,6 +7,18 @@
 #include "data_paths.h"
 #include "functions.h"
 namespace {
+CandidatePresentation presentation(Engine& engine,const MyimeState& state) {
+    CandidatePresentation view;
+    view.active=state.active!=0; view.preedit=wide(state.preedit);
+    view.caret=wide({state.preedit.data,std::min(state.caret,state.preedit.len)}).size();
+    view.selected=state.selected; view.page=state.page; view.last_page=state.last_page!=0;
+    view.rows.reserve(state.count);
+    for (size_t i=0;i<state.count;++i) {
+        MyimeCandidate c{}; if (engine.candidate(engine.handle,i,&c)) throw std::runtime_error(engine.last_error());
+        view.rows.push_back({wide(c.label),wide(c.text),wide(c.comment)});
+    }
+    return view;
+}
 // No back-reference to the service. Windows may retain this sink when an owner
 // rejects StartComposition. Late callbacks cannot retain or touch an engine.
 class CompositionObserver final : public ITfCompositionSink {
@@ -140,6 +152,8 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
         if (!n || n>=32768) { Deactivate(); return E_FAIL; }
         diagnostics_.event(L"Engine initialization begin");
         engine_.open(std::filesystem::path(module).parent_path(),paths.root,diagnostics_);
+        themes_.open(std::filesystem::path(module).parent_path(),paths.root);
+        update_theme();
         diagnostics_.event(L"Engine initialization complete");
         diagnostics_.module(L"myime_core.dll"); diagnostics_.module(L"rime.dll");
         manager_=manager; client_=id;
@@ -197,7 +211,7 @@ void WindowsInputAdapter::switch_context(ITfContext* c) {
     edit_cookie_=TF_INVALID_COOKIE;
     layout_cookie_=TF_INVALID_COOKIE; context_=c;
     if (engine_.handle) {
-        try { if (!engine_.profile()) log_failure("AppProfile resolution failed"); }
+        try { if (!engine_.profile()) log_failure("AppProfile resolution failed"); else update_theme(); }
         catch (...) { engine_.enabled=false; log_failure("AppProfile resolution failed"); }
         update_mode();
     }
@@ -222,7 +236,8 @@ HRESULT WindowsInputAdapter::Deactivate() {
     end_candidates(); ui_manager_.Reset(); function_advised_=false;
     key_sink_advised_=false;
     manager_cookie_=TF_INVALID_COOKIE; manager_.Reset(); client_=TF_CLIENTID_NULL;
-    window_.destroy(); engine_.close(); composition_observer_.Reset(); return S_OK;
+    window_.destroy(); themes_.close(); theme_id_.clear(); candidate_theme_={};
+    engine_.close(); composition_observer_.Reset(); return S_OK;
 }
 bool WindowsInputAdapter::eligible(ITfContext* c,WPARAM key,LPARAM info) {
     if (!engine_.handle || !engine_.enabled || !c || faulted_ || key>=256) return false;
@@ -419,20 +434,30 @@ HRESULT WindowsInputAdapter::position(TfEditCookie ec,ITfContext* c) {
     if (!s.active) { end_candidates(); hide_candidates(L"inactive-after-layout"); return S_OK; }
     if (candidate_element_ && !candidate_element_->shown()) { hide_candidates(L"display-revoked-after-layout"); return S_OK; }
     if (layout==TF_E_NOLAYOUT) {
-        window_.refresh(engine_,s); candidate_visibility_event(L"no-layout-retain-same-context",layout); return S_OK;
+        window_.refresh(presentation(engine_,s)); candidate_visibility_event(L"no-layout-retain-same-context",layout); return S_OK;
     }
     if (FAILED(layout)) { hide_candidates(L"layout-failure",layout); return S_OK; }
     if (clipped) { hide_candidates(L"caret-clipped",layout); return S_OK; }
     if (empty) { hide_candidates(L"caret-empty",layout); return S_OK; }
-    if (!window_.created() && !window_.create(g_module,this,click)) {
+    if (!window_.created() && !window_.create(g_module,this,click,candidate_theme_)) {
         candidate_visibility_event(L"window-create-failure",E_FAIL); return E_FAIL;
     }
-    window_.set_parent(parent); window_.update(engine_,s,r);
+    window_.set_parent(parent); window_.present(presentation(engine_,s),r);
     candidate_visibility_event(L"layout-ready-update"); return S_OK;
 }
 void WindowsInputAdapter::click(void* owner,int candidate) {
     auto self=static_cast<WindowsInputAdapter*>(owner); if (!self->context_ || self->faulted_) return;
     self->request(self->context_.Get(),candidate>=0?candidate:-3,candidate==-1?0xff55:0xff56,0,false,nullptr);
+}
+void WindowsInputAdapter::update_theme() {
+    MyimeText id{};
+    if (engine_.ui_theme_id(engine_.handle,&id)) throw std::runtime_error(engine_.last_error());
+    const auto requested=wide(id);
+    if (requested==theme_id_) return; // No catalog reads in per-key callbacks.
+    auto theme=themes_.resolve(requested);
+    if (!theme.warning.empty()) diagnostics_.event((L"Theme fallback: "+requested+L"; "+theme.warning).c_str());
+    else diagnostics_.event((L"Theme loaded: "+theme.id).c_str());
+    window_.set_theme(theme); candidate_theme_=std::move(theme); theme_id_=requested;
 }
 HRESULT WindowsInputAdapter::OnEndEdit(ITfContext* c,TfEditCookie,ITfEditRecord*) {
     if (c!=context_.Get() || !composition_) return S_OK;
