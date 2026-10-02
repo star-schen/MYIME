@@ -92,13 +92,17 @@ impl Core {
     pub fn apply_profile(&mut self, executable: &str) -> Result<bool, String> {
         let effective = self.config.effective(executable, &Table::new())?;
         if self.effective.as_ref() != Some(&effective) {
-            if self.state().active || !self.state().preedit.is_empty() || !self.state().commit.is_empty() {
-                return Err("Finish composition before switching profile".into());
+            let input_changed = self.effective.as_ref()
+                .is_none_or(|previous| !previous.same_input_configuration(&effective));
+            if input_changed {
+                if self.state().active || !self.state().preedit.is_empty() || !self.state().commit.is_empty() {
+                    return Err("Finish composition before switching profile".into());
+                }
+                let provider = Self::prepare(self.factory.as_ref(), &effective)?;
+                // No fallible work after this point. The provider releases its
+                // native runtime lease. UI-only changes reuse the live provider.
+                self.provider = provider;
             }
-            let provider = Self::prepare(self.factory.as_ref(), &effective)?;
-            // No fallible work after this point. Dropping the old instance is the
-            // provider's responsibility, including its native runtime lease.
-            self.provider = provider;
             self.effective = Some(effective);
         }
         Ok(self.effective.as_ref().unwrap().enabled)

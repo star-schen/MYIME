@@ -12,7 +12,7 @@ pub struct EffectiveConfig {
 pub struct Config {
     document: Table,
 }
-fn merge(base: &mut Table, layer: &Table) {
+pub(crate) fn merge(base: &mut Table, layer: &Table) {
     for (key, value) in layer {
         match (base.get_mut(key), value) {
             (Some(Value::Table(old)), Value::Table(new)) => merge(old, new),
@@ -105,6 +105,14 @@ impl Config {
             .get("enabled")
             .and_then(Value::as_bool)
             .ok_or("enabled must be boolean")?;
+        if let Some(ui) = values.get("ui") {
+            let ui = ui.as_table().ok_or("ui must be a table")?;
+            if let Some(theme) = ui.get("theme") {
+                if !theme.as_str().is_some_and(crate::theme::valid_id) {
+                    return Err("ui.theme must be a theme id, not a path".into());
+                }
+            }
+        }
         let options = values
             .get("options")
             .and_then(Value::as_table)
@@ -122,6 +130,18 @@ impl Config {
             options,
             values,
         })
+    }
+}
+impl EffectiveConfig {
+    pub fn theme_id(&self) -> &str {
+        self.values.get("ui").and_then(Value::as_table).and_then(|ui| ui.get("theme"))
+            .and_then(Value::as_str).unwrap_or("default")
+    }
+    pub fn same_input_configuration(&self, other: &Self) -> bool {
+        // UI is product presentation data; a theme change must not recreate an
+        // input provider or clear composition/commit. Preserve other rules.
+        let mut left = self.values.clone(); let mut right = other.values.clone();
+        left.remove("ui"); right.remove("ui"); left == right
     }
 }
 #[cfg(test)]
@@ -152,5 +172,14 @@ mod tests {
             "[[profiles]]\nexecutable='x.exe'\n[[profiles]]\nexecutable='X.exe'"
         )
         .is_err());
+    }
+    #[test]
+    fn themes_inherit_through_product_layers_and_reject_paths() {
+        let c=Config::parse("[default.ui]\ntheme='default'\n[platform.windows.ui]\ntheme='light'\n[[profiles]]\nexecutable='Editor.exe'\n[profiles.overrides.ui]\ntheme='dark'").unwrap();
+        assert_eq!(c.effective("Other.exe",&Table::new()).unwrap().theme_id(),"light");
+        assert_eq!(c.effective("editor.exe",&Table::new()).unwrap().theme_id(),"dark");
+        assert_eq!(c.effective("editor.exe",&"[ui]\ntheme='ribbon'".parse::<Table>().unwrap()).unwrap().theme_id(),"ribbon");
+        assert!(Config::parse("[default.ui]\ntheme='../other'").is_err());
+        assert!(Config::parse("[default]\nui=false").is_err());
     }
 }

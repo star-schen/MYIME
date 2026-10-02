@@ -1,0 +1,12 @@
+format_version = 1
+id = "ribbon"
+name = "灰色横排"
+version = "1.0.0"
+description = "按 Rime 顺序横排，空间不足时自动换行。"
+[layout]
+orientation = "horizontal"
+min_width = 320
+max_width = 900
+border_radius = 10
+[display]
+comments = false

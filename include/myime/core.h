@@ -31,6 +31,10 @@ int32_t myime_state(MyimeCore*, MyimeState*);
 int32_t myime_candidate(MyimeCore*, size_t page_index, MyimeCandidate*);
 int32_t myime_load_config(MyimeCore*, const char* product_config_path);
 int32_t myime_apply_profile(MyimeCore*, const char* executable_basename, uint32_t* enabled);
+/* Additive ABI v1 export: theme id from last successfully applied config.
+ * Read-only, borrowed until next Core mutation/destroy. Default is "default".
+ */
+int32_t myime_ui_theme_id(MyimeCore*, MyimeText*);
 #ifdef __cplusplus
 }
 #endif

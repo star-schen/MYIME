@@ -20,6 +20,8 @@ public:
         path_=file;
         std::ofstream output(path_,std::ios::binary|std::ios::trunc);
         output << "[default]\nschema='pinyin_simp'\n"
+               << "[default.ui]\ntheme='light'\n"
+               << "[[profiles]]\nexecutable='ThemeOnly.exe'\n[profiles.overrides.ui]\ntheme='dark'\n"
                << "[[profiles]]\nexecutable='Unconfigured.exe'\n[profiles.overrides]\nschema='myime_nonexistent_probe_schema'\n"
                << "[[profiles]]\nexecutable='InvalidOption.exe'\n[profiles.overrides.options]\n\"invalid\\u0000option\"=true\n"
                << "[[profiles]]\nexecutable='Disabled.exe'\n[profiles.overrides]\nenabled=false\n";
@@ -99,6 +101,14 @@ int wmain(int argc, wchar_t** arguments) {
             uint32_t enabled=0;
             passed &= ok(myime_apply_profile(core,"Editor.exe",&enabled)) && enabled==1;
             passed &= ok(myime_key(core,'n',0,&eaten));
+            MyimeText theme_id{};
+            passed &= ok(myime_ui_theme_id(core,&theme_id)) && std::string(theme_id.data,theme_id.len)=="light";
+            passed &= ok(myime_state(core,&state));
+            const auto previous_preedit=std::string(state.preedit.data,state.preedit.len);
+            passed &= ok(myime_apply_profile(core,"ThemeOnly.exe",&enabled));
+            passed &= ok(myime_ui_theme_id(core,&theme_id)) && std::string(theme_id.data,theme_id.len)=="dark";
+            passed &= ok(myime_state(core,&state)) && std::string(state.preedit.data,state.preedit.len)==previous_preedit;
+            passed &= ok(myime_apply_profile(core,"Editor.exe",&enabled));
             passed &= myime_apply_profile(core,"Disabled.exe",&enabled)==-1;
             passed &= ok(myime_clear(core));
             // An unavailable schema must release only the provisional session.

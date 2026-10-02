@@ -1,0 +1,13 @@
+format_version = 1
+id = "light"
+name = "素白"
+version = "1.0.0"
+description = "浅色竖排。未声明的外观项继承雾灰基础值。"
+[colors]
+background = "#FFFFFF"
+text = "#182230"
+muted = "#667085"
+label = "#667085"
+highlight = "#E7EDF5"
+highlight_text = "#102A43"
+border = "#D8DFE8"

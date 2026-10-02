@@ -1,0 +1,44 @@
+# Presentation data only. No input engine, dictionary or executable code.
+format_version = 1
+id = "default"
+name = "雾灰"
+version = "1.0.0"
+description = "中性灰色，竖排候选。也是缺失或损坏主题的回退样式。"
+
+[font]
+family = "Microsoft YaHei UI"
+size = 18
+weight = 400
+
+[layout]
+orientation = "vertical"
+padding_x = 12
+padding_y = 10
+candidate_padding_x = 8
+candidate_padding_y = 6
+spacing = 4
+border_width = 1
+border_radius = 8
+min_width = 240
+max_width = 640
+caret_gap = 4
+
+[colors]
+background = "#F4F4F5"
+text = "#27272A"
+muted = "#62626B"
+label = "#62626B"
+highlight = "#DCDCE1"
+highlight_text = "#18181B"
+border = "#C9C9D0"
+
+[shadow]
+enabled = true
+size = 10
+opacity = 55
+
+[display]
+preedit = true
+comments = true
+labels = true
+page_controls = true

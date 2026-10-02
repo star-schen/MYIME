@@ -133,6 +133,26 @@ fn profiles() -> Config {
 }
 
 #[test]
+fn theme_only_profile_does_not_recreate_provider_or_lose_input() {
+    let (mut core, trace) = setup();
+    core.set_config(Config::parse("[default.ui]\ntheme='light'\n[[profiles]]\nexecutable='Editor.exe'\n[profiles.overrides.ui]\ntheme='dark'").unwrap());
+    core.apply_profile("Other.exe").unwrap();
+    let attempts = trace.borrow().attempts;
+    key(&mut core, 0x6e).unwrap();
+    let preedit = core.state().preedit.clone();
+    let candidate = core.state().candidates[0].text.clone();
+    core.apply_profile("Editor.exe").unwrap();
+    assert_eq!(core.effective_config().unwrap().theme_id(), "dark");
+    assert_eq!(trace.borrow().attempts, attempts);
+    assert_eq!(core.state().preedit, preedit);
+    assert_eq!(core.state().candidates[0].text, candidate);
+    core.select(0).unwrap();
+    core.apply_profile("Other.exe").unwrap();
+    assert_eq!(core.state().commit, "word-0");
+    assert_eq!(trace.borrow().attempts, attempts);
+}
+
+#[test]
 fn factory_applies_initial_schema_and_input_uses_one_live_provider() {
     let (mut core, trace) = setup();
     assert_eq!(core.state().schema, "initial");

@@ -11,7 +11,7 @@ use std::{
     thread::{self, ThreadId},
 };
 thread_local! { static ERROR: RefCell<CString> = RefCell::new(CString::new("").unwrap()); }
-fn boundary(f: impl FnOnce() -> Result<(), String>) -> i32 {
+pub(crate) fn boundary(f: impl FnOnce() -> Result<(), String>) -> i32 {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(Ok(())) => 0,
         result => {
@@ -24,7 +24,7 @@ fn boundary(f: impl FnOnce() -> Result<(), String>) -> i32 {
         }
     }
 }
-unsafe fn string<'a>(p: *const c_char) -> Result<&'a str, String> {
+pub(crate) unsafe fn string<'a>(p: *const c_char) -> Result<&'a str, String> {
     if p.is_null() {
         return Err("Null string argument".into());
     }
@@ -110,6 +110,15 @@ pub unsafe extern "C" fn myime_destroy(p: *mut Core) -> i32 {
     boundary(|| {
         core(p)?;
         drop(Box::from_raw(p));
+        Ok(())
+    })
+}
+#[no_mangle]
+pub unsafe extern "C" fn myime_ui_theme_id(p: *mut Core, out: *mut Text) -> i32 {
+    boundary(|| {
+        if out.is_null() { return Err("Null theme id output".into()); }
+        let id = core(p)?.inner.effective_config().map(|c| c.theme_id()).unwrap_or("default");
+        ptr::write(out, id.into());
         Ok(())
     })
 }

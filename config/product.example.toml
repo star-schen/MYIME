@@ -1,10 +1,13 @@
 # Copy to %LOCALAPPDATA%/MYIME/config.toml. Restart the target app to reload.
-# Implemented settings: enabled, schema, options.<Rime option>.
+# Implemented settings: enabled, schema, options.<Rime option>, ui.theme.
 [default]
 enabled = true
 schema = "pinyin_simp"
 [default.options]
 ascii_mode = false
+
+[default.ui]
+theme = "default" # default / light / dark / ribbon, or a user theme package id.
 
 [platform.windows]
 # Unset fields inherit the defaults.

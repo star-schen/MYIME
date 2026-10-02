@@ -1,0 +1,15 @@
+format_version = 1
+id = "dark"
+name = "墨夜"
+version = "1.0.0"
+description = "深色竖排。"
+[colors]
+background = "#24262B"
+text = "#F1F2F4"
+muted = "#B6BAC5"
+label = "#B6BAC5"
+highlight = "#454A55"
+highlight_text = "#FFFFFF"
+border = "#565D68"
+[shadow]
+opacity = 90
