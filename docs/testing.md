@@ -7,7 +7,7 @@
 | 范围 | 实际结果 |
 |---|---|
 | 安全 Core、配置、主题、导入 | 35/35 Rust 单元测试通过；包括修订冲突、文件锁、备份、注释/未知字段保留、继承、严格 CSV、包校验、全局词库组合及错误边界 |
-| Rust 维护工具 | 4 项单元、7 项真实子进程协议测试，共 11/11；中文 CSV 往返、原文保存、Windows/Profile 覆盖和失效 schema 预检通过 |
+| Rust 维护工具 | 4 项单元、8 项真实子进程协议测试，共 12/12；中文 CSV 往返、原文保存、Windows/Profile 覆盖、失效 schema 预检和与运行时一致的 BOM 处理通过 |
 | C# 设置 | `/warnaserror` 编译通过；隐藏、不激活的 `--self-check` 使用独有 fixture，配置/继承/冲突/Patch/主题/导入和异步完成通过；启用方案只改 Windows 层并保留 Profile 覆盖 |
 | 六页界面 | `DrawToBitmap` 导出基础、主题、Profile、原文、Patch、导入六页 PNG，已逐页阅读；不代表真实不同缩放、多显示器或辅助技术验收 |
 | 官方 Rime 离线部署 | 两个独立中文 CSV 包先后部署；同一 `myime_global` session 实际输入两组拼音并找到对应两条候选；保留旧包、基础依赖和 9 候选 page size；Patch 原文复制一致 |
@@ -18,6 +18,8 @@
 | 维护进程隔离 | PE 依赖检查确认独立 `myime-tool.exe` 不导入 `rime.dll`；构建输出使用独立 Cargo target，避免无 Rime 构建覆盖产品 Core DLL |
 
 初次回归发现 Windows PowerShell 5.1 把没有 BOM 的中文脚本按 ANSI 解释，维护测试脚本改成 ASCII 源稿、测试词按 Unicode 码点构造。首次真实部署又发现仅把 `schema_id` 写进 `__patch` 不满足官方原始 schema 预检；模板现直接声明 identity，并保留嵌套基础 metadata include 与 custom hook，重新生成包后完整回归通过。官方约束见 [librime SchemaUpdate](https://github.com/rime/librime/blob/1.17.0/src/rime/lever/deployment_tasks.cc)。
+
+最后去除产品配置维护中的额外 BOM 归一化：与运行时共用原文解析，正常单个 UTF-8 BOM 保存后保留，多个连续 BOM 作为损坏配置拒绝，不会显示保存成功后又在输入进程中失败。新增真实进程测试确认 `Config::read` 与维护响应一致；修复后再次完整回归退出码 0，Rust 共 **47 项**通过。
 
 新增维护测试目录为 `build/Release/test-artifacts/myime-maintenance-test-<GUID>`，只修改自己的 fixture。C# 自测自行清理其独有 fixture，截图保留在 `build/Release/test-artifacts/settings-0.png` 至 `settings-5.png`。本轮不读取或改写真实导入词库；既有 TSF probe 仍沿用普通身份数据目录租约和诊断日志，不清理用户槽位。
 

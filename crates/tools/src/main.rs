@@ -30,7 +30,7 @@ fn expected(request: &Value) -> Result<FileRevision, BridgeError> {
     .map_err(|e| error("protocol", e.to_string()))
 }
 fn config_response(snapshot: Snapshot, executable: &str) -> Value {
-    let text = snapshot.text.trim_start_matches('\u{feff}');
+    let text = snapshot.text.as_str();
     match Config::parse(text) {
         Ok(config) => {
             let effective = config
@@ -159,7 +159,7 @@ fn check_schemas(request: &Value) -> Result<Value, BridgeError> {
     }
     let snapshot =
         config_bridge::read_snapshot(Path::new(field(request, "path")?), MAX_CONFIG_BYTES)?;
-    let text = snapshot.text.trim_start_matches('\u{feff}');
+    let text = snapshot.text.as_str();
     let config = Config::parse(text).map_err(|e| error("invalid", e))?;
     let document = text
         .parse::<toml::Table>()

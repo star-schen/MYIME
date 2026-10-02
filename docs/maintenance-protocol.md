@@ -58,7 +58,7 @@
 }
 ```
 
-`scope` 为 `default`、`windows` 或 `profile`，后者必须传 EXE basename。允许编辑：`enabled`、`schema`、`theme`、`ascii_mode`、`full_shape`、`ascii_punct`。后三项写入该层的 `options`；theme 写入 `ui.theme`。缺失字段保持；null 删除该层覆盖，恢复继承。空 `changes` 不添加空表。
+`scope` 为 `default`、`windows` 或 `profile`，后者必须传 EXE basename。允许编辑：`enabled`、`schema`、`theme`、`ascii_mode`、`full_shape`、`ascii_punct`。后三项写入该层的 `options`；theme 写入 `ui.theme`。缺失字段保持；null 删除该层覆盖，恢复继承。空 `changes` 不添加空表。产品文本直接交给运行时相同的 `Config::parse`，接受并保留正常的单个 UTF-8 BOM；不会额外移除多个 BOM 并把原本无效的文件误报为有效。
 
 `toml_edit` 保留注释、未识别字段和现有表结构，包含用户手写的 inline profiles 数组。不猜测应用词库或游戏策略。所有结果经 Core 配置解析验证后原子保存，返回同 `config.read` 字段。删除已知覆盖不会删除 profile 中未知字段。
 

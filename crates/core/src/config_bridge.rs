@@ -334,9 +334,7 @@ pub fn validate_product_text(text: &str) -> Result<(), BridgeError> {
             "Product config exceeds 1 MiB",
         ));
     }
-    Config::parse(text.trim_start_matches('\u{feff}'))
-        .map(|_| ())
-        .map_err(invalid)
+    Config::parse(text).map(|_| ()).map_err(invalid)
 }
 /// Source-level replaceable bridge backed by the same production file writer.
 /// Native YAML uses its own validator; this implementation validates product TOML.
@@ -533,7 +531,6 @@ pub fn update_product_text(
     }
     let bom = text.starts_with('\u{feff}');
     let mut document = text
-        .trim_start_matches('\u{feff}')
         .parse::<DocumentMut>()
         .map_err(|e| invalid(e.to_string()))?;
     let layer = match scope {

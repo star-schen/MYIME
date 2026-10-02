@@ -247,3 +247,61 @@ fn dictionary_combine_command_keeps_both_package_sources() {
     assert_eq!(code, 2);
     assert_eq!(bad["kind"], "invalid");
 }
+#[test]
+fn product_bom_handling_matches_runtime_and_preserves_invalid_source() {
+    use myime_core::config::Config;
+    let fixture = Fixture::new();
+    let path = fixture.path("config.toml");
+    let original = "\u{feff}# normal UTF-8 BOM\n[default.ui]\ntheme='light'\n";
+    fs::write(&path, original).unwrap();
+    let (read, code) = call(json!({"version":1,"command":"config.read","path":path}));
+    assert_eq!(code, 0);
+    assert_eq!(read["valid"], true);
+    assert!(Config::read(&path).is_ok());
+    let (updated, code) = call(
+        json!({"version":1,"command":"config.update","path":path,"expected":read["revision"],"scope":"default","changes":{"theme":"dark"}}),
+    );
+    assert_eq!(code, 0);
+    assert_eq!(updated["valid"], true);
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.starts_with('\u{feff}'));
+    assert_eq!(text.matches('\u{feff}').count(), 1);
+    assert_eq!(
+        Config::read(&path)
+            .unwrap()
+            .effective("", &toml::Table::new())
+            .unwrap()
+            .theme_id(),
+        "dark"
+    );
+    let valid = "\u{feff}[default.ui]\ntheme='ribbon'\n";
+    let (saved, code) = call(
+        json!({"version":1,"command":"config.write","path":path,"expected":updated["revision"],"text":valid}),
+    );
+    assert_eq!(code, 0);
+    assert_eq!(saved["valid"], true);
+    assert!(Config::read(&path).is_ok());
+    let invalid = "\u{feff}\u{feff}[default]\nenabled=true\n";
+    let (rejected, code) = call(
+        json!({"version":1,"command":"config.write","path":path,"expected":saved["revision"],"text":invalid}),
+    );
+    assert_eq!(code, 2);
+    assert_eq!(rejected["kind"], "invalid");
+    assert_eq!(fs::read_to_string(&path).unwrap(), valid);
+    fs::write(&path, invalid).unwrap();
+    let (broken, code) = call(json!({"version":1,"command":"config.read","path":path}));
+    assert_eq!(code, 0);
+    assert_eq!(broken["valid"], false);
+    assert_eq!(broken["text"], invalid);
+    assert!(Config::read(&path).is_err());
+    let (_, code) = call(
+        json!({"version":1,"command":"config.update","path":path,"expected":broken["revision"],"scope":"default","changes":{"enabled":false}}),
+    );
+    assert_eq!(code, 2);
+    assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+    let (_, code) = call(
+        json!({"version":1,"command":"config.check-schemas","path":path,"schemas":["pinyin_simp"]}),
+    );
+    assert_eq!(code, 2);
+    assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+}
