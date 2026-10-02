@@ -127,6 +127,10 @@ pub unsafe extern "C" fn myime_deploy(shared: *const c_char, user: *const c_char
     boundary(|| rime::deploy(string(shared)?, string(user)?))
 }
 #[no_mangle]
+pub unsafe extern "C" fn myime_deploy_schema(shared: *const c_char, user: *const c_char, schema_file: *const c_char) -> i32 {
+    boundary(|| rime::deploy_schema(string(shared)?, string(user)?, string(schema_file)?))
+}
+#[no_mangle]
 pub unsafe extern "C" fn myime_key(p: *mut Core, key: i32, mask: i32, eaten: *mut u32) -> i32 {
     boundary(|| {
         if eaten.is_null() {

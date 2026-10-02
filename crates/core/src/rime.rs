@@ -110,10 +110,21 @@ pub fn deploy(shared: &str, user: &str) -> Result<(), String> {
     runtime.0.initialize(shared, user)?;
     runtime.0.deploy()
 }
+pub fn deploy_schema(shared: &str, user: &str, schema_file: &str) -> Result<(), String> {
+    let file = CString::new(schema_file).map_err(|e| e.to_string())?;
+    let mut runtime = lock_runtime()?;
+    runtime.0.initialize(shared, user)?;
+    runtime.0.deploy()?;
+    if unsafe { rb_deploy_schema(file.as_ptr()) } == 0 {
+        return Err("Explicit schema deployment failed".into());
+    }
+    Ok(())
+}
 extern "C" {
     fn rb_initialize(shared: *const c_char, user: *const c_char, first: i32) -> i32;
     fn rb_finalize();
     fn rb_deploy() -> i32;
+    fn rb_deploy_schema(file: *const c_char) -> i32;
     fn rb_create() -> usize;
     fn rb_destroy(id: usize);
     fn rb_key(id: usize, key: i32, mask: i32) -> i32;

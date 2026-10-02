@@ -33,6 +33,7 @@ int rb_deploy() {
     api->set_notification_handler(nullptr,nullptr);
     return result.load()==1;
 }
+int rb_deploy_schema(const char* file) { return rime_get_api()->deploy_schema(file); }
 uintptr_t rb_create() { return rime_get_api()->create_session(); }
 void rb_destroy(uintptr_t id) { rime_get_api()->destroy_session(id); }
 int rb_key(uintptr_t id, int key, int mask) { return rime_get_api()->process_key(id, key, mask); }

@@ -23,6 +23,10 @@ const char* myime_last_error(void);
 int32_t myime_create(const char* shared, const char* user, const char* schema, MyimeCore** out);
 int32_t myime_destroy(MyimeCore*);
 int32_t myime_deploy(const char* shared, const char* user);
+/* Offline maintenance only; caller owns an isolated writable workspace.
+ * Compile one explicit schema after normal deployment; no live sessions.
+ */
+int32_t myime_deploy_schema(const char* shared, const char* user, const char* schema_file);
 int32_t myime_key(MyimeCore*, int32_t keysym, int32_t rime_mask, uint32_t* eaten);
 int32_t myime_select(MyimeCore*, size_t page_index);
 int32_t myime_clear(MyimeCore*);

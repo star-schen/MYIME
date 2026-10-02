@@ -69,10 +69,8 @@ pub trait SyncProvider {
     fn fetch(&self, path: &str) -> Result<Option<SyncObject>, String>;
     fn put(&self, object: &SyncObject, if_match: Option<&str>) -> Result<SyncWrite, String>;
 }
-pub struct FileRevision {
-    pub modified_unix_ms: u128,
-    pub hash: String,
-}
+// One revision contract for settings, import preview and extension writers.
+pub use crate::config_bridge::FileRevision;
 pub struct ConfigChange {
     pub path: PathBuf,
     pub expected: FileRevision,
@@ -82,7 +80,9 @@ pub enum BridgeResult {
     Applied,
     ExternalModification { actual: FileRevision },
 }
-/// Preserve unknown native YAML, compare revisions, deploy outside the hot path.
+/// Revision-controlled complete file text. `proposed_patch` is the proposed
+/// complete document, not a request to semantically merge arbitrary YAML.
+/// Deployment and synchronization stay outside the hot path.
 pub trait ConfigBridge {
     fn apply_patch(&self, change: ConfigChange) -> Result<BridgeResult, String>;
 }
