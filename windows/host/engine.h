@@ -8,6 +8,7 @@
 #include "user_data.h"
 #include "diagnostics.h"
 #include "encoding.h"
+#include "workspace_paths.h"
 class Engine {
     HMODULE dll_=nullptr;
     UserDataLease user_data_;
@@ -39,7 +40,8 @@ public:
         diagnostics.event(L"Acquiring user directory lease");
         const auto user_dir=user_data_.acquire(data_root/L"rime"/L"slots");
         diagnostics.event(user_dir.c_str());
-        const auto shared=module_dir/L"data"/L"shared";
+        const auto shared=user_data_.shared_data(module_dir,data_root);
+        diagnostics.event(shared.c_str());
         if (!std::filesystem::exists(shared/L"build"/L"pinyin_simp.table.bin")) throw std::runtime_error("Deploy and stage Rime data before activation");
         diagnostics.event(L"Creating Rime session from deployed data");
         if (create(utf8(shared.wstring()).c_str(),utf8(user_dir.wstring()).c_str(),"pinyin_simp",&handle)) throw std::runtime_error("Rime session creation failed");

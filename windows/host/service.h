@@ -9,6 +9,7 @@
 #include "diagnostics.h"
 #include "candidate_element.h"
 #include "mode_indicator.h"
+#include "settings_action.h"
 using Microsoft::WRL::ComPtr;
 class WindowsInputAdapter final : public ITfTextInputProcessorEx, public ITfKeyEventSink,
     public ITfTextEditSink, public ITfThreadMgrEventSink, public ITfTextLayoutSink, public ITfFunctionProvider {
@@ -60,6 +61,8 @@ private:
     ComPtr<ITfLangBarItemMgr> language_bar_;
     ComPtr<ModeIndicator> mode_indicator_;
     bool mode_added_=false;
+    SettingsAction settings_;
+    static HRESULT open_settings(void*);
     void update_mode();
     static HWND mode_owner(void*);
     ComPtr<ITfUIElementMgr> ui_manager_;

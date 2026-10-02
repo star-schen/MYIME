@@ -17,9 +17,10 @@ class ModeIndicator final : public ITfLangBarItemButton, public ITfSource {
     bool ascii_=false,attached_=true;
     void* owner_=nullptr;
     HWND (*get_owner_)(void*)=nullptr;
+    HRESULT (*open_settings_)(void*)=nullptr;
     const Diagnostics* diagnostics_=nullptr;
     Microsoft::WRL::ComPtr<ITfLangBarItemSink> sink_;
-    enum : UINT { OpenSettings=1 }; // Future launcher action; no GUI dependency.
+    enum : UINT { OpenSettings=1 };
     HRESULT text(const wchar_t* value,BSTR* out) {
         if (!out) return E_POINTER; *out=SysAllocString(value); return *out?S_OK:E_OUTOFMEMORY;
     }
@@ -27,12 +28,13 @@ class ModeIndicator final : public ITfLangBarItemButton, public ITfSource {
         auto sink=sink_; if (sink) sink->OnUpdate(flags);
     }
 public:
-    ModeIndicator(void* owner,HWND (*get_owner)(void*),const Diagnostics* diagnostics)
-        :owner_(owner),get_owner_(get_owner),diagnostics_(diagnostics) { InterlockedIncrement(&g_objects); }
+    ModeIndicator(void* owner,HWND (*get_owner)(void*),const Diagnostics* diagnostics,
+                  HRESULT (*open_settings)(void*)=nullptr)
+        :owner_(owner),get_owner_(get_owner),open_settings_(open_settings),diagnostics_(diagnostics) { InterlockedIncrement(&g_objects); }
     ~ModeIndicator() { InterlockedDecrement(&g_objects); }
     void refresh() { notify(TF_LBI_STATUS|TF_LBI_ICON|TF_LBI_TEXT|TF_LBI_TOOLTIP); }
     void update(bool ascii) { if (ascii_!=ascii) { ascii_=ascii; refresh(); } }
-    void detach() { attached_=false; owner_=nullptr; get_owner_=nullptr; diagnostics_=nullptr; status_|=TF_LBI_STATUS_DISABLED; sink_.Reset(); }
+    void detach() { attached_=false; owner_=nullptr; get_owner_=nullptr; open_settings_=nullptr; diagnostics_=nullptr; status_|=TF_LBI_STATUS_DISABLED; sink_.Reset(); }
     STDMETHODIMP QueryInterface(REFIID iid,void** out) override {
         if (!out) return E_POINTER; *out=nullptr;
         if (iid==IID_IUnknown || iid==IID_ITfLangBarItem || iid==IID_ITfLangBarItemButton) *out=static_cast<ITfLangBarItemButton*>(this);
@@ -74,22 +76,26 @@ public:
         if (!attached_ || click!=TF_LBI_CLK_RIGHT) return S_OK; // Left click intentionally inert.
         Microsoft::WRL::ComPtr<ITfLangBarItemButton> lifetime=this;
         HMENU menu=CreatePopupMenu(); if (!menu) return HRESULT_FROM_WIN32(GetLastError());
-        AppendMenuW(menu,MF_STRING|MF_GRAYED,OpenSettings,L"设置");
+        AppendMenuW(menu,MF_STRING|(open_settings_?0:MF_GRAYED),OpenSettings,L"设置");
         HWND owner=get_owner_?get_owner_(owner_):nullptr;
-        const HRESULT hr=owner?S_OK:E_FAIL;
+        HRESULT hr=owner?S_OK:E_FAIL;
         if (diagnostics_) diagnostics_->event(L"Mode indicator right click",hr);
         if (owner) {
-            TrackPopupMenuEx(menu,TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTBUTTON|TPM_BOTTOMALIGN,
+            const auto action=TrackPopupMenuEx(menu,TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTBUTTON|TPM_BOTTOMALIGN,
                 point.x,point.y,owner,nullptr);
+            if (action==OpenSettings) hr=OnMenuSelect(OpenSettings);
         }
         DestroyMenu(menu); return hr;
     }
     STDMETHODIMP InitMenu(ITfMenu* menu) override {
         if (!menu) return E_POINTER;
         if (diagnostics_) diagnostics_->event(L"Mode indicator system menu");
-        return menu->AddMenuItem(OpenSettings,TF_LBMENUF_GRAYED,nullptr,nullptr,L"设置",2,nullptr);
+        return menu->AddMenuItem(OpenSettings,attached_ && open_settings_?0:TF_LBMENUF_GRAYED,nullptr,nullptr,L"设置",2,nullptr);
     }
-    STDMETHODIMP OnMenuSelect(UINT) override { return S_OK; }
+    STDMETHODIMP OnMenuSelect(UINT action) override {
+        if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;
+        return action==OpenSettings && attached_ && open_settings_?open_settings_(owner_):S_OK;
+    }
     STDMETHODIMP AdviseSink(REFIID iid,IUnknown* source,DWORD* cookie) override {
         if (!cookie || !source) return E_POINTER; *cookie=TF_INVALID_COOKIE;
         if (GetCurrentThreadId()!=thread_) return RPC_E_WRONG_THREAD;

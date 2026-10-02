@@ -2,6 +2,7 @@
 #include "theme_catalog.h"
 #include "data_paths.h"
 #include <windowsx.h>
+#include <shellapi.h>
 
 namespace {
 constexpr int ThemeChoice=101,Reload=102,Orientation=103,FontSize=104;
@@ -12,6 +13,8 @@ struct Preview {
     ThemeCatalog catalog;
     CandidateWindow candidates;
     CandidateTheme theme;
+    std::filesystem::path data_root;
+    std::wstring requested_theme;
     std::vector<std::wstring> ids;
     struct Control { HWND window; int x,y,w,h; };
     std::vector<Control> controls;
@@ -64,7 +67,7 @@ struct Preview {
     }
     void initialize() {
         wchar_t path[32768]{}; if (!GetModuleFileNameW(module,path,_countof(path))) throw std::runtime_error("Preview path unavailable");
-        catalog.open(std::filesystem::path(path).parent_path(),DataPaths::resolve().root);
+        catalog.open(std::filesystem::path(path).parent_path(),data_root.empty()?DataPaths::resolve().root:data_root);
         font=CreateFontW(-px(16),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
         control(L"STATIC",L"MYIME 候选主题预览",0,0,24,20,650,30);
@@ -78,7 +81,8 @@ struct Preview {
             const auto label=available_theme.name+L"  ("+id+L")";
             SendMessageW(choice,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label.c_str()));
         }
-        SendMessageW(choice,CB_SETCURSEL,0,0);
+        const auto selected=std::find(ids.begin(),ids.end(),requested_theme);
+        SendMessageW(choice,CB_SETCURSEL,selected==ids.end()?0:static_cast<WPARAM>(selected-ids.begin()),0);
         control(L"STATIC",L"布局",0,0,24,142,55,24);
         orientation=control(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_TABSTOP,Orientation,80,138,120,160);
         SendMessageW(orientation,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"竖排"));
@@ -118,13 +122,25 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
     return DefWindowProcW(hwnd,msg,w,l);
 }
 }
-int WINAPI wWinMain(HINSTANCE module,HINSTANCE,PWSTR command_line,int show) {
-    const bool self_check=std::wstring(command_line?command_line:L"")==L"--self-check";
+int WINAPI wWinMain(HINSTANCE module,HINSTANCE,PWSTR,int show) {
+    bool self_check=false;
     Preview preview; preview.module=module;
     WNDCLASSW wc{}; wc.lpfnWndProc=procedure; wc.hInstance=module; wc.lpszClassName=L"MYIME.ThemePreview.v1";
     wc.hCursor=LoadCursorW(nullptr,IDC_ARROW); wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
     RegisterClassW(&wc);
     try {
+        int count=0; auto arguments=CommandLineToArgvW(GetCommandLineW(),&count);
+        if (!arguments) return 2;
+        struct Arguments { LPWSTR* value; ~Arguments() { LocalFree(value); } } owner{arguments};
+        for (int i=1;i<count;++i) {
+            const std::wstring argument=arguments[i];
+            if (argument==L"--self-check") self_check=true;
+            else if (argument==L"--data-root" && i+1<count) {
+                preview.data_root=arguments[++i];
+                if (!preview.data_root.is_absolute()) throw std::runtime_error("Data root must be absolute");
+            } else if (argument==L"--theme" && i+1<count) preview.requested_theme=arguments[++i];
+            else throw std::runtime_error("Unknown preview argument");
+        }
         const auto dpi=GetDpiForSystem();
         preview.window=CreateWindowExW(0,wc.lpszClassName,L"MYIME 主题预览",WS_OVERLAPPEDWINDOW,160,100,
             MulDiv(780,static_cast<int>(dpi),96),MulDiv(780,static_cast<int>(dpi),96),nullptr,nullptr,module,&preview);

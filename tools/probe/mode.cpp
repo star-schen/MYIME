@@ -18,7 +18,7 @@ public:
 class Menu final : public ITfMenu {
     long refs_=1;
 public:
-    int items=0; bool valid=true;
+    int items=0; bool valid=true; DWORD expected_flags=TF_LBMENUF_GRAYED;
     STDMETHODIMP QueryInterface(REFIID iid,void** out) override {
         if (!out) return E_POINTER; *out=nullptr;
         if (iid!=IID_IUnknown && iid!=IID_ITfMenu) return E_NOINTERFACE;
@@ -27,9 +27,10 @@ public:
     STDMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&refs_); }
     STDMETHODIMP_(ULONG) Release() override { auto n=InterlockedDecrement(&refs_); if (!n) delete this; return n; }
     STDMETHODIMP AddMenuItem(UINT,DWORD flags,HBITMAP,HBITMAP,const WCHAR* text,ULONG length,ITfMenu** child) override {
-        ++items; valid &= flags==TF_LBMENUF_GRAYED && std::wstring(text,length)==L"设置" && !child; return S_OK;
+        ++items; valid &= flags==expected_flags && std::wstring(text,length)==L"设置" && !child; return S_OK;
     }
 };
+HRESULT open_settings(void* owner) { ++*static_cast<int*>(owner); return S_OK; }
 int main() {
     g_module=GetModuleHandleW(nullptr);
     auto item=new ModeIndicator(nullptr,nullptr,nullptr);
@@ -47,6 +48,13 @@ int main() {
     passed &= item->GetIcon(&icon)==S_OK && icon; if (icon) DestroyIcon(icon);
     auto menu=new Menu; passed &= item->InitMenu(menu)==S_OK && menu->items==1 && menu->valid; menu->Release();
     item->detach(); item->Release(); passed &= g_objects==0; sink->Release();
+    int opened=0; item=new ModeIndicator(&opened,nullptr,nullptr,open_settings);
+    menu=new Menu; menu->expected_flags=0;
+    passed &= item->InitMenu(menu)==S_OK && menu->valid;
+    passed &= item->OnMenuSelect(1)==S_OK && opened==1;
+    item->OnClick(TF_LBI_CLK_LEFT,POINT{},nullptr); passed &= opened==1;
+    item->detach(); item->OnMenuSelect(1); passed &= opened==1;
+    menu->Release(); item->Release(); passed &= g_objects==0;
     std::puts(passed?"Mode icon/menu/notifications: PASS":"Mode icon/menu/notifications: FAIL");
     return passed?0:1;
 }

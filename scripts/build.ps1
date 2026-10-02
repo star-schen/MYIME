@@ -18,11 +18,16 @@ if ($cmake) { $cmake = $cmake.Source } else {
 }
 if (!(Test-Path $cmake)) { throw 'CMake is missing. Run scripts/bootstrap.ps1.' }
 $profile = if ($Configuration -eq 'Release') { 'release' } else { 'debug' }
-$cargoArgs = @('build','--workspace','--locked')
+$cargoArgs = @('build','-p','myime-core','--locked')
 if ($Configuration -eq 'Release') { $cargoArgs += '--release' }
 & cargo @cargoArgs
 if ($LASTEXITCODE) { throw 'Rust build failed' }
+$toolArgs = @('build','-p','myime-tool','--locked','--target-dir',"target/maintenance-$profile")
+if ($Configuration -eq 'Release') { $toolArgs += '--release' }
+& cargo @toolArgs
+if ($LASTEXITCODE) { throw 'Rust maintenance tool build failed' }
 & $cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 "-DRUST_PROFILE=$profile"
 if ($LASTEXITCODE) { throw 'CMake configure failed' }
 & $cmake --build build --config $Configuration
 if ($LASTEXITCODE) { throw 'C++ build failed' }
+& "$PSScriptRoot/build-settings.ps1" -Configuration $Configuration

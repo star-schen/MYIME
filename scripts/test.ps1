@@ -8,6 +8,9 @@ if ($Configuration -eq 'Release') { $testArgs += '--release' }
 & cargo @testArgs
 if ($LASTEXITCODE) { throw 'Rust tests failed' }
 & "$PSScriptRoot/prepare-data.ps1" -Configuration $Configuration
+& "$PSScriptRoot/test-maintenance.ps1" -Configuration $Configuration
+$settings = Start-Process -FilePath "$root/build/$Configuration/myime-settings.exe" -ArgumentList '--self-check' -WindowStyle Hidden -Wait -PassThru
+if ($settings.ExitCode) { throw 'C# settings fixture test failed' }
 & "$root/build/$Configuration/myime-probe.exe" "$root/runtime/shared" "$root/runtime/user"
 if ($LASTEXITCODE) { throw 'C ABI / librime integration failed' }
 & "$root/build/$Configuration/myime-theme-probe.exe"

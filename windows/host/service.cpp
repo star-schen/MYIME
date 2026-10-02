@@ -153,6 +153,7 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
         diagnostics_.event(L"Engine initialization begin");
         engine_.open(std::filesystem::path(module).parent_path(),paths.root,diagnostics_);
         themes_.open(std::filesystem::path(module).parent_path(),paths.root);
+        settings_.configure(std::filesystem::path(module).parent_path(),paths.root,paths.app_container);
         update_theme();
         diagnostics_.event(L"Engine initialization complete");
         diagnostics_.module(L"myime_core.dll"); diagnostics_.module(L"rime.dll");
@@ -161,7 +162,8 @@ HRESULT WindowsInputAdapter::ActivateEx(ITfThreadMgr* manager,TfClientId id,DWOR
         if (FAILED(hr)) { diagnostics_.event(L"UIElement manager unavailable",hr); Deactivate(); return hr; }
         hr=manager_.As(&language_bar_);
         if (SUCCEEDED(hr)) {
-            mode_indicator_.Attach(new ModeIndicator(this,mode_owner,&diagnostics_));
+            mode_indicator_.Attach(new ModeIndicator(this,mode_owner,&diagnostics_,
+                settings_.available()?open_settings:nullptr));
             hr=language_bar_->AddItem(mode_indicator_.Get()); mode_added_=SUCCEEDED(hr);
         }
         if (FAILED(hr)) { diagnostics_.event(L"Mode indicator registration failed",hr); Deactivate(); return hr; }
@@ -237,6 +239,7 @@ HRESULT WindowsInputAdapter::Deactivate() {
     key_sink_advised_=false;
     manager_cookie_=TF_INVALID_COOKIE; manager_.Reset(); client_=TF_CLIENTID_NULL;
     window_.destroy(); themes_.close(); theme_id_.clear(); candidate_theme_={};
+    settings_.clear();
     engine_.close(); composition_observer_.Reset(); return S_OK;
 }
 bool WindowsInputAdapter::eligible(ITfContext* c,WPARAM key,LPARAM info) {
@@ -458,6 +461,11 @@ void WindowsInputAdapter::update_theme() {
     if (!theme.warning.empty()) diagnostics_.event((L"Theme fallback: "+requested+L"; "+theme.warning).c_str());
     else diagnostics_.event((L"Theme loaded: "+theme.id).c_str());
     window_.set_theme(theme); candidate_theme_=std::move(theme); theme_id_=requested;
+}
+HRESULT WindowsInputAdapter::open_settings(void* owner) {
+    auto self=static_cast<WindowsInputAdapter*>(owner);
+    const auto result=self->settings_.open();
+    self->diagnostics_.event(L"Open settings action",result); return result;
 }
 HRESULT WindowsInputAdapter::OnEndEdit(ITfContext* c,TfEditCookie,ITfEditRecord*) {
     if (c!=context_.Get() || !composition_) return S_OK;

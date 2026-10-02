@@ -15,6 +15,7 @@ add_custom_target(stage_runtime ALL
   COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/$<CONFIG>"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/target/${RUST_PROFILE}/myime_core.dll" "${CMAKE_BINARY_DIR}/$<CONFIG>/myime_core.dll"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/.deps/librime/dist/lib/rime.dll" "${CMAKE_BINARY_DIR}/$<CONFIG>/rime.dll"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/target/maintenance-${RUST_PROFILE}/${RUST_PROFILE}/myime-tool.exe" "${CMAKE_BINARY_DIR}/$<CONFIG>/myime-tool.exe"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/themes" "${CMAKE_BINARY_DIR}/$<CONFIG>/themes")
 add_library(myime_host SHARED windows/host/dll.cpp windows/host/service.cpp windows/host/candidate_window.cpp windows/host/myime.def windows/host/myime.rc)
 target_link_libraries(myime_host PRIVATE ole32 oleaut32 advapi32 uuid user32 gdi32 shell32 userenv)
@@ -44,3 +45,11 @@ add_executable(myime-theme-probe tools/probe/themes.cpp windows/host/candidate_w
 target_include_directories(myime-theme-probe PRIVATE include windows/host)
 target_link_libraries(myime-theme-probe PRIVATE user32 gdi32 gdiplus "${CMAKE_SOURCE_DIR}/target/${RUST_PROFILE}/myime_core.dll.lib")
 add_dependencies(myime-theme-probe stage_runtime)
+add_executable(myime-data-tool windows/data_tool/main.cpp)
+target_include_directories(myime-data-tool PRIVATE include windows/host)
+target_link_libraries(myime-data-tool PRIVATE ole32 "${CMAKE_SOURCE_DIR}/target/${RUST_PROFILE}/myime_core.dll.lib")
+add_dependencies(myime-data-tool stage_runtime)
+add_executable(myime-workspace-probe tools/probe/workspace.cpp)
+target_include_directories(myime-workspace-probe PRIVATE include windows/host)
+target_link_libraries(myime-workspace-probe PRIVATE "${CMAKE_SOURCE_DIR}/target/${RUST_PROFILE}/myime_core.dll.lib")
+add_dependencies(myime-workspace-probe stage_runtime)

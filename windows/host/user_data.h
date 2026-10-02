@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <filesystem>
 #include <stdexcept>
+#include "workspace_paths.h"
 // Share one lease across all TSF threads in this process. Each other process
 // gets a different persistent slot, avoiding concurrent LevelDB opens.
 class UserDataLease {
@@ -19,6 +20,7 @@ class UserDataLease {
         HANDLE file=INVALID_HANDLE_VALUE;
         size_t users=0;
         std::filesystem::path path;
+        std::filesystem::path shared_data;
     };
     static Shared& shared() { static Shared value; return value; }
     bool acquired_=false;
@@ -54,6 +56,14 @@ public:
         if (!acquired_) return;
         auto& state=shared(); ExclusiveLock guard(state.mutex);
         acquired_=false;
-        if (--state.users==0) { CloseHandle(state.file); state.file=INVALID_HANDLE_VALUE; state.path.clear(); }
+        if (--state.users==0) { CloseHandle(state.file); state.file=INVALID_HANDLE_VALUE; state.path.clear(); state.shared_data.clear(); }
+    }
+    std::filesystem::path shared_data(const std::filesystem::path& module_directory,const std::filesystem::path& data_root) {
+        auto& state=shared(); ExclusiveLock guard(state.mutex);
+        if (!acquired_) throw std::runtime_error("User directory lease required");
+        // All live TSF apartments in this process must use the same Rime paths,
+        // even when an offline tool publishes a new generation meanwhile.
+        if (state.shared_data.empty()) state.shared_data=WorkspacePaths::shared(module_directory,data_root);
+        return state.shared_data;
     }
 };
