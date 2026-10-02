@@ -1,5 +1,18 @@
 # 测试状态与验收
 
+## 最新主题回归（2026-10-02）
+
+沿用用户明确要求直接执行测试的授权，主题数据包、Windows 绘制和预览已完成 Release 编译及 `scripts/test.ps1 -Configuration Release` 全部回归，退出码 0。未安装、替换正在使用的 DLL 或操作真实搜索/游戏。
+
+- 20 项 Rust 测试全部通过：在既有 14 项上增加主题解析/继承/参数边界/未知元数据/缺失回退、配置 theme 分层/非法路径，以及仅主题变化不重建 Provider/丢组合或 commit。
+- 真实 Rime/C ABI probe 增加组合期间的主题 Profile 切换与只读 theme id，既有输入、分页、commit、生命周期继续通过。
+- 主题 probe 通过用户包优先与删除恢复、损坏/缺失回退、ABI 输出大小、跨线程拒绝、横竖排原 index 点击、隐藏后旧点击、相同状态不重绘、40 次换主题 GDI 资源和 100 候选视口。
+- Preview --self-check 通过控件创建、主题选择、预览布局/字号变化和重新加载；不创建 Rime session、不改配置。
+- 普通/UI-less 应用自绘/拒绝组合三种 TSF 模式、COM、候选、模式菜单和兼容初始化全部通过；仍为 Begin=1、Update=10、提交前 End=0，pbShow 两种协商符合实际窗口可见性。
+- 以同一 CandidateWindow 的 WM_PRINTCLIENT 导出灰色/浅色/深色/横排示例 PNG，并阅读灰色、深色和横排截图；没有截取用户输入。PNG 在 build/Release/test-artifacts，不提交仓库。
+
+这些测试不覆盖已注册输入法的真实键盘/鼠标路由、系统托盘、Windows 搜索、实际不同 DPI 多屏和高对比度观察。当前候选主题不构成搜索修复结论。主题格式与验收步骤见 [themes.md](themes.md)。以下保留 2026-09-30 记录。
+
 2026-09-30 用户明确授权执行测试后，当前 Provider 重构与搜索候选诊断已完成 **Release 编译和完整自动回归**，发现的问题已修正并重跑通过。未安装或替换正在使用的 DLL，未操作真实 Notepad/Edge、Windows 搜索、系统托盘或游戏。以后是否运行测试仍按协作约定与当次授权决定。
 
 ## 本轮实际结果（2026-09-30）

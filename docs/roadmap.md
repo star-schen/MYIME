@@ -2,12 +2,12 @@
 
 共同约束：Windows Host 负责平台适配；官方 librime/schema/dictionary 负责输入算法。按键全程进程内、不使用 IPC；产品 TOML 与原生 Rime YAML 分离并保留用户 patch。当前扩展 trait 是源码级替换接口，没有稳定二进制插件 ABI。各阶段实施前明确输入/输出、权威数据源、验收和失败恢复，按实际需要组织职责，不为未来功能过度拆分 crate。
 
-本轮只实施阶段 1 和单独的 Windows 搜索候选诊断。以下后续阶段均是计划，不代表已实现或已测试。
+截至 2026-10-02，阶段 1 与阶段 2 已实施并完成自动回归；Windows 搜索仍待目标日志。阶段 3 及以后是后续计划。
 
 | 阶段 | 交付范围 | 验收/交接 |
 |---|---|---|
 | 1 Provider 接入 | Core 实际持有 `Box<dyn InputProvider>`；唯一生产 RimeProvider、配置工厂、原子 Profile 替换、安全 Core 状态/commit 编排、薄 C ABI；测试专用 Provider | Release 编译、14 项 Rust 测试、真实 Rime/C ABI 与 TSF 回归已通过；修复未部署 schema 的错误接受；ABI v1 保持不变，真实桌面验收待安装 |
-| 2 候选主题数据包 | 定义主题 manifest/版本/字体/颜色/间距资源；Host 按配置加载绘制数据，配置/数据包保持单一来源 | 仅改变外观数据；候选顺序、分页和选词继续由 Rime；回退默认主题、DPI/可访问性/资源生命周期验收 |
+| 2 候选主题数据包 | 已实现 TOML manifest/版本/字体/颜色/间距、横竖布局、圆角/阴影、高对比度颜色、用户包覆盖/撤销和同绘制代码的独立预览 | Release 编译、20 项 Rust 测试、主题 ABI/点击/回退/资源/预览及既有 TSF 回归通过；候选顺序/分页保持 Rime 语义，真实多屏/DPI/高对比度仍待验收；见 themes.md |
 | 3 配置 Bridge 与独立 C# 设置 | 将 ConfigBridge 的 revision/mtime/hash、外部修改冲突与 patch 保留规则落地；独立 C# 设置进程编辑产品配置、按约定交接原生部署 | 设置进程不进入按键路径；未知 YAML/用户 patch 保留；冲突显示和部署失败可恢复；中/A 左键与菜单动作另行确定 |
 | 4 本机学习一致性、词库数据包与导入 | 基于 Rime sync export/merge 协调各持久 slot 的学习；词库 manifest+data+metadata；TXT/CSV → ImportedWord → Converter → 离线部署 | 不复制覆盖 live LevelDB；先实现可复现的本机 merge/冲突规则，再接词库包和导入；来源、编码、频次、失败回退明确 |
 | 5 WebDAV | SyncProvider 传输 Rime 导出的同步对象，ETag/If-Match 表达并发冲突；凭据独立安全存储 | 依赖阶段 4 的本机一致性；离线重试、远端冲突、账号边界和导出数据验收；不传输 live userdb、不进入按键路径 |

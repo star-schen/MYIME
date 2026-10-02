@@ -2,7 +2,7 @@
 
 MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Windows/COM/文本编辑和候选窗口，Rust 负责输入状态、产品配置、AppProfile 及 Rime 安全封装。按键路径全部在应用进程内，无 socket、pipe、HTTP 或设置 GUI 依赖。
 
-当前是开发版。2026-09-30 按用户明确授权，首轮 Provider 接入与 Windows 搜索候选诊断已完成 **Release 编译及全部自动回归**：14 项 Rust 测试、真实 librime/C ABI、COM、候选、模式图标、TSF 和兼容程序初始化均通过。回归发现并修复了未部署 schema 仍被接受、导致 Profile 替换正常实例的问题。**未安装新版；Notepad/Edge、系统托盘和 Windows 搜索的真实交互仍待验收**。用户反馈旧版闪烁已消失、图标正常，但搜索无候选栏而可提交；搜索修复仍待目标日志定位。参见 [架构](docs/architecture.md)、[测试记录](docs/testing.md)、[搜索采集](docs/search-candidates.md) 和 [分阶段路线](docs/roadmap.md)。
+当前是开发版。2026-10-02 已完成路线图阶段 2 的**候选主题数据包与独立预览**；Release 编译、20 项 Rust 测试、主题/预览及既有 librime/C ABI/COM/TSF 回归通过。**未自动安装新版；真实 Notepad/Edge、系统托盘和 Windows 搜索仍待验收**。搜索无候选栏但能提交的问题仍待目标日志定位，主题功能不代表已修复搜索。参见 [主题使用](docs/themes.md)、[架构](docs/architecture.md)、[测试记录](docs/testing.md) 和 [路线图](docs/roadmap.md)。
 
 ## 已实现
 
@@ -10,8 +10,9 @@ MYIME 是一个以 librime 为输入引擎的 Windows TSF 前端。C++ 负责 Wi
 - Windows Host → C ABI v1 → 安全 Rust Core → InputProvider → RimeProvider → librime 官方版本化 C API；RimeProvider 是唯一生产输入实现，没有重新实现输入算法。
 - 官方 `pinyin_simp` schema/dictionary、Rime session、用户词库、preedit、候选分页/选词、commit。
 - TSF edit session 中的 composition/文本提交、UTF-8 caret 到 UTF-16 转换。
-- 不夺焦点的竖排候选窗口：跟随 TSF caret，键盘/鼠标选词、上一页/下一页。
-- TOML 产品配置与 EXE AppProfile；工厂先完成新 Provider 的配置和初始快照，成功后替换旧实例，失败保留旧实例及有效配置；组合/待确认提交期间禁止变更 Profile。
+- 不夺焦点的候选窗口：跟随 TSF caret，键盘/鼠标选词、上一页/下一页；横竖布局、字体/颜色/间距、圆角/柔和阴影、高对比度系统颜色。
+- TOML 数据主题包：雾灰、素白、墨夜、灰色横排；用户包覆盖/撤销、损坏回退到内嵌雾灰；同一绘制代码的独立预览。
+- TOML 产品配置与 EXE AppProfile；输入配置变化先完成新 Provider 的配置和初始快照，成功后替换旧实例，失败保留旧实例及有效配置；组合/待确认提交期间禁止变更输入配置，仅主题变化复用 Provider 并保留状态。
 - 搜索候选元数据诊断：显示协商、Show、上下文/HWND、caret 布局 HRESULT、实际可见性和隐藏原因，去重并限量，不记录正文。
 - UI-less 当前页候选快照、受限应用独立数据目录、空闲状态标点交给 Rime。
 - 嵌入 DLL 的 MY 品牌图标、“中 / A”模式指示及右键置灰“设置”菜单；左键切换暂未实现。
@@ -77,13 +78,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall.ps1
 
 在 Notepad / Edge 普通文本框中选择 MYIME 后输入 `nihao`，用空格/数字键选择候选；PageUp/PageDown 或候选窗口底部翻页；Esc 取消。Shift 的中英文切换由 Rime schema 的 `ascii_composer` 决定。Ctrl/Alt/Win 组合键让应用处理，尚不支持所有 schema 快捷键。
 
-配置示例：将 `config/product.example.toml` 复制到 `%LOCALAPPDATA%/MYIME/config.toml`，编辑后重启目标应用。v1 实际可配置项为 `enabled`、`schema`、`options.<Rime option>`。schema 必须已部署；不根据应用名称猜测词库或兼容策略。
+配置示例：首次配置可将 `config/product.example.toml` 复制到 `%LOCALAPPDATA%/MYIME/config.toml`，已有配置请仅编辑字段，编辑后重启目标应用。实际可配置项为 `enabled`、`schema`、`options.<Rime option>`、`ui.theme`。schema 必须已部署；不根据应用名称猜测词库或兼容策略。
 
 用户数据位于 `%LOCALAPPDATA%/MYIME/rime/slots/<n>`。每个应用进程租用一个持久槽位，该进程的所有 TSF 线程共享它；目录不会自动删除。**并发进程的学习词频目前不自动合并**，后续用 Rime sync export/merge 处理，不能直接覆盖正在使用的 userdb。
 
 原生 Rime YAML、schema、dictionary 保持原样。`runtime/user/default.custom.yaml` 是初始产品 patch，仅在不存在时生成；修改后手动重新部署和打包。GUI bridge 的 mtime/hash、冲突提示和双向同步只定义了接口，尚未实现。
 
 ## 兼容性测试程序
+
+主题预览：运行 `out/MYIME-Release/myime-theme-preview.exe`，选择主题或临时修改预览字号/布局；不需要安装、不改变当前输入配置。启用主题在产品配置 `[default.ui]` 中设置 `theme = "dark"`，或用 default/light/ribbon；完整主题制作/撤销说明见 [themes.md](docs/themes.md)。
 
 ```powershell
 build/Release/myime-compat.exe
@@ -104,6 +107,8 @@ crates/core/native/   官方 rime_get_api 的机械转发桥接
 include/myime/       唯一公共 C ABI 契约
 windows/host/        TSF、COM、候选窗口、Windows 生命周期与用户目录租约
 windows/compat/      兼容性测试程序与 ITextStoreACP 文档
+windows/theme_preview/ 独立原生候选主题预览（C# 设置程序尚未实现）
+themes/              manifest 和外观数据，无 DLL 或脚本
 tools/probe/         C ABI、COM、TSF 自动测试入口
 scripts/             依赖、构建、部署、测试、打包、安装/卸载
 docs/                架构约束、测试范围与后续工作
@@ -111,7 +116,7 @@ docs/                架构约束、测试范围与后续工作
 
 ## 当前边界
 
-仅 x64；尚无 x86/ARM64、IMM32 adapter、完整搜索建议集成、完整 DPI/皮肤/UIA 系统、设置 GUI、词库导入或 WebDAV 实现。UI-less 只导出当前 Rime 页，不能跨页随机访问或接受应用重新分页；受限应用的学习和配置独立，未实现合并。极大 page size、复杂多显示器缩放、受保护/沙箱应用、外部选择区移动及异常 text store 行为仍需实际应用测试。不声明安全桌面支持。
+仅 x64；尚无 x86/ARM64、IMM32 adapter、完整搜索建议集成、完整 UIA provider、C# 设置 GUI、词库导入或 WebDAV。主题包及预览已实现，复杂多显示器 DPI/高对比度仍待真实验收。UI-less 只导出当前 Rime 页，不能跨页随机访问或接受应用重新分页；受限应用的学习和配置独立，未实现合并。受保护/沙箱应用、外部选择区移动及异常 text store 行为仍需实际应用测试。不声明安全桌面支持。
 
 StartComposition 被应用拒绝时，当前 Windows 会保留一个独立的 composition 回调对象；它不持有服务/Core，DLL 会按 COM 引用计数保持映射直到外部引用释放。文档写入失败后暂停该 context 的输入，等待焦点切换恢复；不伪造成功 commit。详情见 [架构说明](docs/architecture.md)。
 

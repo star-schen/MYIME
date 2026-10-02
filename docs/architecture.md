@@ -15,7 +15,7 @@ Windows 决定 HWND、绘制、字体、caret 屏幕坐标、键盘虚拟键转�
 - `rime.rs` 的 RimeFactory/RimeProvider 是唯一生产实现；Session 和 Runtime 私有。适配器负责进程级 mutex、native session、状态复制和 runtime 引用计数；unsafe 仍仅在 Rime/FFI 边界。每个 Provider 拥有一个 session，process/select/clear 的 native 操作和快照读取在同一次锁持有期间完成。
 - `ffi.rs` 仅保留 opaque handle、创建线程检查、参数转换、panic/错误转换和 C 输出 view。Rust trait/struct 不跨 C ABI，`include/myime/core.h` 的导出、版本及结构布局不变。ProcessError 保留 native 操作失败前已经吞键的事实，FFI 转成原有 eaten 输出，避免同一按键又送给应用。
 
-Profile 替换顺序为：求 effective config → 若配置未变则复用实例 → 拒绝组合/待确认 commit 期间的变更 → 通过官方配置 API 确认部署后的 schema id 与 engine/processors → 工厂创建临时 session → 选择 schema/应用 options → 读取初始快照 → Core 确认新状态空闲 → 替换 Provider 和有效配置。不能仅凭 select_schema/schema_open 返回成功判定方案可用：librime 对不存在的方案也可能返回成功或空配置。schema、option 名或快照读取失败只销毁临时资源，旧实例及其有效配置保留；后续可重试。加载产品文件只暂存新文档，解析/读文件失败不覆盖文档，成功加载也不清除最后有效配置。首次 myime_create 使用传入 schema；首次 apply_profile 才应用产品默认/Profile，与原有 Host 时序一致。enabled 仍由现有 Host 用于输入资格判断。
+Profile 替换顺序为：求 effective config → 若输入配置未变则复用实例 → 拒绝组合/待确认 commit 期间的输入配置变更 → 通过官方配置 API 确认部署后的 schema id 与 engine/processors → 工厂创建临时 session → 选择 schema/应用 options → 读取初始快照 → Core 确认新状态空闲 → 替换 Provider 和有效配置。ui 是展示配置；只更换主题更新有效配置，不重建 Provider、不改组合/待确认 commit。不能仅凭 select_schema/schema_open 返回成功判定方案可用：librime 对不存在的方案也可能返回成功或空配置。schema、option 名或快照读取失败只销毁临时资源，旧实例及其有效配置保留；后续可重试。加载产品文件只暂存新文档，解析/读文件失败不覆盖文档，成功加载也不清除最后有效配置。首次 myime_create 使用传入 schema；首次 apply_profile 才应用产品默认/Profile，与原有 Host 时序一致。enabled 仍由现有 Host 用于输入资格判断。
 
 RimeFactory 在锁内初始化/创建；临时 Session 声明在锁 guard 之后，失败或 Rust unwind 时先销毁 session，再由 guard 在 session 数为零时 finalize。成功才增加计数。RimeProvider::Drop 在锁内销毁其 session、减少计数；最后一个 Provider 释放后 finalize。Profile 准备期间旧、新 session 短暂共存，不会中途 finalize。正常操作拒绝 poisoned mutex；Drop 取得其内部 guard 做资源清理，不继续输入。部署也由适配器持锁，只允许无 live session 的离线路径，不在按键或 DllMain 中发生。
 
@@ -72,6 +72,8 @@ application-rendered UI 通过 `ITfUIElementMgr` 与 `ITfCandidateListUIElementB
 受限应用的身份由有效令牌确定：AppContainer 使用系统 GetAppContainerFolderPath 返回目录，普通应用使用 FOLDERID_LocalAppData，各自在其下使用 MYIME/rime/slots。只读词库来自 Program Files 的预部署数据。不会扩大用户词库 ACL、复制 live userdb 或在输入路径部署。受限环境的学习与配置独立，尚未合并；目录不可写时激活失败并记录阶段。[系统目录接口](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-getappcontainerfolderpath)
 
 ## 系统接入和错误处理
+
+主题包使用安全 Rust theme.rs 解析/校验，theme_ffi.rs 提供独立 presentation ABI 1；Core ABI v1 仅新增只读主题 id 导出，原结构保持不变。候选/主题字段在 Host 中复制为自有快照；CandidateWindow 只接受展示数据，不持有 Engine/Core/Rime 句柄。ThemeCatalog 在激活及选择不同主题的 context/profile 变化时加载，按键重用内存；缺失/损坏主题回退内嵌资产。字体/颜色/窗口 geometry 始终由 Windows Frontend 使用；主题包没有代码入口。独立原生预览使用同一绘制类和示例数据，不创建 Rime session。详见 [主题包与边界](themes.md)。
 
 COM server 使用 Apartment 线程模型，DLL 引用计数包括 factory、service、edit session 和 composition observer。DllMain 只保存模块句柄。通过绝对路径与 DLL_LOAD_DIR/DEFAULT_DIRS 安全加载 Core 及其依赖，避免依赖工作目录。安装到 Program Files；注册同时处理 COM、TSF profile 和 keyboard category。[官方注册说明](https://learn.microsoft.com/en-us/windows/win32/tsf/text-service-registration)
 
