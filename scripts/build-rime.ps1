@@ -64,8 +64,26 @@ if ($LASTEXITCODE) { throw 'Pinned librime dependency build failed.' }
 # A fresh product source tree preserves the immutable upstream checkout.
 $digest = [Security.Cryptography.SHA256]::Create()
 try { $generation = ([BitConverter]::ToString($digest.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity)))).Replace('-','').Substring(0,20).ToLowerInvariant() } finally { $digest.Dispose() }
-$source = Join-Path $cache ('source-' + $generation)
-$build = Join-Path $cache ('build-' + $generation)
+$cacheRoot = [IO.Path]::GetFullPath($cache).TrimEnd('\')
+$source = [IO.Path]::GetFullPath((Join-Path $cacheRoot ('source-' + $generation)))
+$build = Join-Path $cacheRoot ('build-' + $generation)
+# A failed build can leave a partially unpacked or patched source tree. Start
+# from the immutable archive again rather than extracting over existing files.
+if ($generation -notmatch '^[0-9a-f]{20}$' -or
+    [IO.Path]::GetDirectoryName($source) -ne $cacheRoot -or
+    [IO.Path]::GetFileName($source) -ne ('source-' + $generation)) {
+    throw 'Generated librime source path is outside its cache.'
+}
+if ((Get-Item -LiteralPath $cacheRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw 'Librime cache must not redirect to another directory.'
+}
+if (Test-Path -LiteralPath $source) {
+    $stagedSource = Get-Item -LiteralPath $source -Force
+    if (!$stagedSource.PSIsContainer -or ($stagedSource.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Generated librime source must be a regular cache directory.'
+    }
+    Remove-Item -LiteralPath $source -Recurse -Force
+}
 New-Item -ItemType Directory -Path $source -Force | Out-Null
 $archive = Join-Path $cache ('source-' + $generation + '.tar')
 & git -C $upstream archive --format=tar --output=$archive $lock.librime.commit
