@@ -13,6 +13,12 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct BackgroundLayer { pub color: u32, pub border: u32, pub border_width: u32, pub border_radius: u32 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct InputCard { pub background: BackgroundLayer, pub text: u32, pub caret: u32 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct CandidateCard { pub background: BackgroundLayer, pub text: u32, pub muted: u32, pub label: u32, pub highlight: u32, pub highlight_text: u32 }
+#[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
     pub id: String, pub name: String, pub version: String, pub description: String,
     pub font_family: String, pub font_size: u32, pub font_weight: u32,
@@ -25,6 +31,7 @@ pub struct Theme {
     pub highlight: u32, pub highlight_text: u32, pub border: u32,
     pub shadow: bool, pub shadow_size: u32, pub shadow_opacity: u32,
     pub preedit: bool, pub comments: bool, pub labels: bool, pub page_controls: bool,
+    pub input: InputCard, pub candidates: CandidateCard,
 }
 
 fn item<'a>(table: &'a Table, section: &str, key: &str) -> Result<&'a Value, String> {
@@ -57,6 +64,29 @@ fn color(table: &Table, key: &str) -> Result<u32, String> {
     }
     u32::from_str_radix(&value[1..], 16).map_err(|e| e.to_string())
 }
+fn layer<'a>(table: &'a Table, path: &str) -> Result<Option<&'a Table>, String> {
+    let mut current = table;
+    for part in path.split('.') {
+        match current.get(part) { None => return Ok(None), Some(value) => current = value.as_table().ok_or_else(|| format!("{path} must be a table"))? }
+    }
+    Ok(Some(current))
+}
+fn layer_color(table: &Table, path: &str, key: &str, default: u32) -> Result<u32, String> {
+    let Some(value) = layer(table, path)?.and_then(|t| t.get(key)) else { return Ok(default); };
+    let value = value.as_str().ok_or_else(|| format!("{path}.{key} must be #RRGGBB"))?;
+    if value.len() != 7 || !value.starts_with('#') || !value.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit) { return Err(format!("{path}.{key} must be opaque #RRGGBB")); }
+    u32::from_str_radix(&value[1..], 16).map_err(|e| e.to_string())
+}
+fn layer_number(table: &Table, path: &str, key: &str, high: i64) -> Result<u32, String> {
+    let Some(value) = layer(table, path)?.and_then(|t| t.get(key)) else { return Ok(0); };
+    let value = value.as_integer().ok_or_else(|| format!("{path}.{key} must be integer"))?;
+    if !(0..=high).contains(&value) { return Err(format!("{path}.{key} must be 0..{high}")); }
+    Ok(value as u32)
+}
+fn card_background(table: &Table, path: &str, background: u32, border: u32) -> Result<BackgroundLayer, String> {
+    Ok(BackgroundLayer { color: layer_color(table, path, "color", background)?, border: layer_color(table, path, "border", border)?,
+        border_width: layer_number(table, path, "border_width", 4)?, border_radius: layer_number(table, path, "border_radius", 32)? })
+}
 impl Theme {
     pub fn builtin() -> Self { Self::parse(DEFAULT).expect("Bundled theme must be valid") }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -81,6 +111,16 @@ impl Theme {
         let min_width = number(&values, "layout", "min_width", 80, 1200)?;
         let max_width = number(&values, "layout", "max_width", 80, 1600)?;
         if min_width > max_width { return Err("min_width exceeds max_width".into()); }
+        // Resolve legacy defaults and optional cards once for runtime and editor.
+        let background = layer_color(&values, "background", "color", color(&values, "background")?)?;
+        let text = color(&values, "text")?; let muted = color(&values, "muted")?; let border = color(&values, "border")?;
+        let input = InputCard { background: card_background(&values, "input.background", background, border)?,
+            text: layer_color(&values, "input.characters", "color", text)?, caret: layer_color(&values, "input.characters", "caret", muted)? };
+        let candidates = CandidateCard { background: card_background(&values, "candidates.background", background, border)?,
+            text: layer_color(&values, "candidates.characters", "color", text)?, muted: layer_color(&values, "candidates.characters", "comment", muted)?,
+            label: layer_color(&values, "candidates.characters", "label", color(&values, "label")?)?,
+            highlight: layer_color(&values, "candidates.background", "highlight", color(&values, "highlight")?)?,
+            highlight_text: layer_color(&values, "candidates.characters", "selected", color(&values, "highlight_text")?)? };
         Ok(Self {
             id, name, version, description,
             font_family: bounded_text(item(&values, "font", "family")?, "font.family", 128)?,
@@ -94,7 +134,7 @@ impl Theme {
             border_width: number(&values, "layout", "border_width", 0, 4)?,
             border_radius: number(&values, "layout", "border_radius", 0, 32)?,
             min_width, max_width, caret_gap: number(&values, "layout", "caret_gap", 0, 32)?,
-            background: color(&values, "background")?, text: color(&values, "text")?,
+            background, text,
             muted: color(&values, "muted")?, label: color(&values, "label")?,
             highlight: color(&values, "highlight")?, highlight_text: color(&values, "highlight_text")?,
             border: color(&values, "border")?,
@@ -103,6 +143,7 @@ impl Theme {
             shadow_opacity: number(&values, "shadow", "opacity", 0, 160)?,
             preedit: flag(&values, "display", "preedit")?, comments: flag(&values, "display", "comments")?,
             labels: flag(&values, "display", "labels")?, page_controls: flag(&values, "display", "page_controls")?,
+            input, candidates,
         })
     }
     pub fn read(path: &Path) -> Result<Self, String> {
@@ -126,10 +167,9 @@ pub fn resolve(id: &str, user_root: &Path, installed_root: &Path) -> ResolvedThe
                 Err(e) => return Err(e.to_string()),
                 Ok(true) => {},
             }
-            let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
-            let canonical_file = file.canonicalize().map_err(|e| e.to_string())?;
-            if !canonical_file.starts_with(&canonical_root) { return Err("Theme path leaves its catalog".into()); }
-            let theme = Theme::read(&canonical_file)?;
+            let opened = crate::catalog_file::open(root, &file)?;
+            let mut text = String::new(); opened.take(MAX_MANIFEST_BYTES + 1).read_to_string(&mut text).map_err(|e| e.to_string())?;
+            let theme = Theme::parse(&text)?;
             if theme.id != id { return Err("Manifest id differs from its directory".into()); }
             return Ok(theme);
         }

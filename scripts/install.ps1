@@ -1,10 +1,13 @@
-param([ValidateSet('Debug','Release')][string]$Configuration = 'Release')
+﻿param([ValidateSet('Debug','Release')][string]$Configuration = 'Release',
+      [ValidatePattern('^S-1-[0-9-]+$')][string]$OwnerSid = ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value),
+      [string]$UserDataRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MYIME'))
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/registration.ps1"
+. "$PSScriptRoot/shared-data.ps1"
 Assert-InstallerAdministrator
 $root = Split-Path $PSScriptRoot -Parent
 $package = Join-Path $root "out/MYIME-$Configuration"
-foreach ($required in @('myime_host.dll','myime_core.dll','rime.dll','data/shared/build/pinyin_simp.table.bin')) {
+foreach ($required in @('myime_host.dll','myime_core.dll','rime.dll','myime-settings.exe','myime-tool.exe','myime-learning-tool.exe','data/shared/build/pinyin_simp.table.bin')) {
     if (!(Test-Path -LiteralPath (Join-Path $package $required) -PathType Leaf)) {
         throw "Package incomplete ($required). Build, prepare data and package before installing."
     }
@@ -21,6 +24,11 @@ Get-ChildItem -LiteralPath $package -Force | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force
 }
 $newDll = Join-Path $destination 'myime_host.dll'
+Initialize-MyimeSharedData $OwnerSid $destination
+if (!$UserDataRoot -or ![IO.Path]::IsPathRooted($UserDataRoot) -or $UserDataRoot.Contains('"')) { throw 'Invalid origin user data directory.' }
+$publishArguments = @('--publish','--owner-sid',$OwnerSid,'--data-root',('"' + $UserDataRoot.TrimEnd('\') + '"'))
+$publication = Start-Process -FilePath (Join-Path $destination 'myime-settings.exe') -ArgumentList $publishArguments -Wait -PassThru -WindowStyle Hidden
+if ($publication.ExitCode) { throw "Initial shared configuration publication failed. Registration unchanged; files retained at $destination." }
 if ($previous) { Invoke-MyimeRegistration -Dll $previous -Unregister }
 try {
     Invoke-MyimeRegistration -Dll $newDll

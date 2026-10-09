@@ -3,13 +3,16 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Presentation ABI 1. No Rime session required. No C++/Rust object layout.
+/* Presentation ABI 2. No Rime session required. No C++/Rust object layout.
  * Handles are thread-affine; views are borrowed until theme_destroy.
  * Dimensions use DIPs (96 DIPs/inch), colors are 0xRRGGBB, flags are 0/1.
  * Resolve returns embedded default + warning for a missing/invalid package.
  * Root directories are supplied by the platform; selectors are ids, not paths.
  */
 typedef struct MyimeTheme MyimeTheme;
+typedef struct { uint32_t color, border, border_width, border_radius; } MyimeBackgroundLayer;
+typedef struct { MyimeBackgroundLayer background; uint32_t text, caret; } MyimeInputCard;
+typedef struct { MyimeBackgroundLayer background; uint32_t text, muted, label, highlight, highlight_text; } MyimeCandidateCard;
 typedef struct {
     MyimeText id, name, version, description, font_family, warning;
     uint32_t font_size, font_weight, horizontal;
@@ -18,8 +21,12 @@ typedef struct {
     uint32_t background, text, muted, label, highlight, highlight_text, border;
     uint32_t shadow, shadow_size, shadow_opacity;
     uint32_t preedit, comments, labels, page_controls;
+    MyimeInputCard input;
+    MyimeCandidateCard candidates;
 } MyimeThemeView;
 uint32_t myime_theme_abi_version(void);
+/* Parse an editor draft; invalid data returns failure instead of fallback. */
+int32_t myime_theme_parse(const char* toml_utf8, MyimeTheme** out);
 int32_t myime_theme_resolve(const char* id, const char* user_root,
                            const char* installed_root, MyimeTheme** out);
 int32_t myime_theme_view(MyimeTheme*, size_t out_size, MyimeThemeView*);

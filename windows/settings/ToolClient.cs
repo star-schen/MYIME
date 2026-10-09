@@ -17,10 +17,10 @@ namespace Myime.Settings
         internal static JavaScriptSerializer Serializer() { return new JavaScriptSerializer { MaxJsonLength = MaximumJsonChars, RecursionLimit = 64 }; }
         internal Dictionary<string, object> Send(Dictionary<string, object> request)
         {
-            if (!File.Exists(executable)) throw new IOException("找不到 myime-tool.exe，请使用完整的 MYIME 安装包。");
+            if (!File.Exists(executable)) throw new IOException(UiText.Get("找不到 myime-tool.exe，请使用完整的 MYIME 安装包。"));
             request["version"] = 1;
             string json = Serializer().Serialize(request);
-            if (json.Length > MaximumJsonChars) throw new IOException("请求超过设置工具的大小限制。");
+            if (json.Length > MaximumJsonChars) throw new IOException(UiText.Get("请求超过设置工具的大小限制。"));
             return Execute(executable, "--request", json, 25000);
         }
         internal static Dictionary<string, object> Execute(string executable, string arguments, string input, int timeout)
@@ -33,7 +33,7 @@ namespace Myime.Settings
             };
             using (var process = new Process { StartInfo = start })
             {
-                if (!process.Start()) throw new IOException("无法启动配置工具。");
+                if (!process.Start()) throw new IOException(UiText.Get("无法启动配置工具。"));
                 Task<string> output = Task.Factory.StartNew(() => ReadBounded(process.StandardOutput));
                 Task<string> errors = Task.Factory.StartNew(() => ReadBounded(process.StandardError));
                 try
@@ -41,12 +41,12 @@ namespace Myime.Settings
                     if (input != null) { byte[] bytes = new UTF8Encoding(false).GetBytes(input); process.StandardInput.BaseStream.Write(bytes, 0, bytes.Length); }
                     process.StandardInput.Close();
                     if (!Task.WaitAll(new Task[] { output, errors }, timeout) || !process.WaitForExit(3000))
-                        throw new IOException("工具响应超时；操作结果未确认，请重新读取后再操作。");
+                        throw new IOException(UiText.Get("工具响应超时；操作结果未确认，请重新读取后再操作。"));
                     var result = Serializer().DeserializeObject(output.Result) as Dictionary<string, object>;
-                    if (result == null || !result.ContainsKey("ok")) throw new IOException("工具返回了无效响应。");
+                    if (result == null || !result.ContainsKey("ok")) throw new IOException(UiText.Get("工具返回了无效响应。"));
                     return result;
                 }
-                catch (AggregateException error) { throw new IOException("读取工具响应失败。", error.GetBaseException()); }
+                catch (AggregateException error) { throw new IOException(UiText.Get("读取工具响应失败。"), error.GetBaseException()); }
                 finally { try { if (!process.HasExited) process.Kill(); } catch (InvalidOperationException) { } }
             }
         }
@@ -55,12 +55,12 @@ namespace Myime.Settings
         {
             var text = new StringBuilder(); var buffer = new char[4096]; int count;
             while ((count = reader.Read(buffer, 0, buffer.Length)) > 0)
-            { if (text.Length + count > MaximumJsonChars) throw new IOException("工具响应超过大小限制。"); text.Append(buffer, 0, count); }
+            { if (text.Length + count > MaximumJsonChars) throw new IOException(UiText.Get("工具响应超过大小限制。")); text.Append(buffer, 0, count); }
             return text.ToString();
         }
         internal static string Quote(string argument)
         {
-            if (argument.IndexOf('\0') >= 0) throw new ArgumentException("路径含无效字符。");
+            if (argument.IndexOf('\0') >= 0) throw new ArgumentException(UiText.Get("路径含无效字符。"));
             var output = new StringBuilder("\""); int slashes = 0;
             foreach (char c in argument)
             { if (c == '\\') { slashes++; continue; } if (c == '"') { output.Append('\\', slashes * 2 + 1); output.Append(c); } else { output.Append('\\', slashes); output.Append(c); } slashes = 0; }

@@ -6,8 +6,12 @@
   },
   "librime": {
     "version": "1.17.0",
-    "url": "https://github.com/rime/librime/releases/download/1.17.0/rime-33e7814-Windows-msvc-x64.7z",
-    "sha256": "7478C7CAA4FF6B37DE86DABA1F7CE4A994A4F5BA24872A820FB2B3A9B01FED15"
+    "commit": "33e78140250125871856cdc5b42ddc6a5fcd3cd4"
+  },
+  "vcpkg": {
+    "commit": "ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0",
+    "triplet": "x64-windows-static",
+    "ports": ["boost-algorithm", "boost-crc", "boost-interprocess", "boost-range", "boost-regex", "boost-scope-exit", "boost-signals2", "boost-unordered", "boost-uuid", "yaml-cpp", "leveldb", "marisa-trie", "opencc"]
   },
   "data": [
     { "repo": "rime-prelude", "commit": "082425ea0684bca36474415d4a0e8db9b016487e" },

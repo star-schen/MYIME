@@ -28,6 +28,7 @@ impl Config {
             document: text.parse::<Table>().map_err(|e| e.to_string())?,
         };
         config.effective("", &Table::new())?;
+        config.learning()?;
         if let Some(profiles) = config.document.get("profiles") {
             let profiles = profiles.as_array().ok_or("profiles must be an array")?;
             let mut seen = Vec::new();
@@ -55,6 +56,11 @@ impl Config {
             Err(e) => Err(e.to_string()),
         }
     }
+    /// Read-only source for projections after product validation.
+    pub fn document(&self) -> &Table {
+        &self.document
+    }
+    pub fn learning(&self) -> Result<crate::learning::Learning, String> { crate::learning::Learning::from_document(&self.document) }
     pub fn effective(&self, exe: &str, runtime: &Table) -> Result<EffectiveConfig, String> {
         let mut values: Table = "schema='pinyin_simp'\nenabled=true\n[options]\nascii_mode=false"
             .parse()
@@ -113,6 +119,12 @@ impl Config {
                 }
             }
         }
+        if let Some(input) = values.get("input") {
+            let input = input.as_table().ok_or("input must be a table")?;
+            for (key, allowed) in [("focus", &["retain", "cancel", "commit"][..]), ("caps_lock", &["compose_uppercase", "commit_then_direct"][..])] {
+                if let Some(value) = input.get(key) { if !value.as_str().is_some_and(|s| allowed.contains(&s)) { return Err(format!("Invalid input.{key}")); } }
+            }
+        }
         let options = values
             .get("options")
             .and_then(Value::as_table)
@@ -133,6 +145,7 @@ impl Config {
     }
 }
 impl EffectiveConfig {
+    pub fn input_policy(&self, key: &str, default: &str) -> String { self.values.get("input").and_then(Value::as_table).and_then(|t| t.get(key)).and_then(Value::as_str).unwrap_or(default).to_owned() }
     pub fn theme_id(&self) -> &str {
         self.values.get("ui").and_then(Value::as_table).and_then(|ui| ui.get("theme"))
             .and_then(Value::as_str).unwrap_or("default")
@@ -141,7 +154,7 @@ impl EffectiveConfig {
         // UI is product presentation data; a theme change must not recreate an
         // input provider or clear composition/commit. Preserve other rules.
         let mut left = self.values.clone(); let mut right = other.values.clone();
-        left.remove("ui"); right.remove("ui"); left == right
+        for key in ["ui", "input"] { left.remove(key); right.remove(key); } left == right
     }
 }
 #[cfg(test)]

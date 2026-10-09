@@ -5,8 +5,9 @@ $source = Join-Path $root "build/$Configuration"
 $package = Join-Path $root "out/MYIME-$Configuration"
 if (!(Test-Path "$source/data/shared/build/pinyin_simp.table.bin")) { throw 'Build and prepare data first using the matching Configuration.' }
 New-Item -ItemType Directory -Force $package,"$package/notices" | Out-Null
-foreach ($file in @('myime_host.dll','myime_core.dll','rime.dll','myime-compat.exe','myime-theme-preview.exe','myime-settings.exe','myime-settings.exe.config','myime-tool.exe','myime-data-tool.exe')) { Copy-Item "$source/$file" $package -Force }
+foreach ($file in @('myime_host.dll','myime_core.dll','rime.dll','myime-compat.exe','myime-theme-preview.exe','myime-settings.exe','myime-settings.exe.config','myime-tool.exe','myime-data-tool.exe','myime-learning-tool.exe')) { Copy-Item "$source/$file" $package -Force }
 Copy-Item "$source/themes" $package -Recurse -Force
+Copy-Item "$source/languages" $package -Recurse -Force
 Copy-Item "$source/data" $package -Recurse -Force
 Copy-Item "$root/LICENSE","$root/README.md","$root/THIRD_PARTY.md","$root/dependencies.lock.json" $package -Force
 Copy-Item "$root/config/product.example.toml" $package -Force
@@ -18,3 +19,7 @@ foreach ($entry in (Get-Content "$root/dependencies.lock.json" -Raw | ConvertFro
     if (Test-Path "$root/.deps/$($entry.repo)/AUTHORS") { Copy-Item "$root/.deps/$($entry.repo)/AUTHORS" $notice -Force }
 }
 Write-Host "Local development package: $package (not a public release package; see THIRD_PARTY.md)"
+New-Item -ItemType Directory -Path "$package/notices/librime" -Force | Out-Null
+Copy-Item -LiteralPath "$root/.deps/rime-shared/dist/LICENSE" -Destination "$package/notices/librime/LICENSE" -Force
+$copyrights = "$root/.deps/vcpkg-myime/installed/x64-windows-static/share"
+if (Test-Path -LiteralPath $copyrights) { Get-ChildItem -LiteralPath $copyrights -Directory | ForEach-Object { $notice = Join-Path $_.FullName 'copyright'; if (Test-Path -LiteralPath $notice) { $target = Join-Path $package ('notices/dependencies/' + $_.Name); New-Item -ItemType Directory -Path $target -Force | Out-Null; Copy-Item -LiteralPath $notice -Destination $target -Force } } }

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include "workspace_paths.h"
+#include "platform_error.h"
 // Share one lease across all TSF threads in this process. Each other process
 // gets a different persistent slot, avoiding concurrent LevelDB opens.
 class UserDataLease {
@@ -40,7 +41,7 @@ public:
                 HANDLE file=CreateFileW((path/L".host.lock").c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
                 if (file!=INVALID_HANDLE_VALUE) { state.path=std::move(path); state.file=file; break; }
                 const auto error=GetLastError();
-                if (error!=ERROR_SHARING_VIOLATION && error!=ERROR_LOCK_VIOLATION) throw std::runtime_error("Cannot lease a Rime user directory");
+                if (error!=ERROR_SHARING_VIOLATION && error!=ERROR_LOCK_VIOLATION) throw PlatformError("Lease Rime user directory",HRESULT_FROM_WIN32(error));
             }
             if (state.file==INVALID_HANDLE_VALUE) throw std::runtime_error("No free Rime user directory slot");
         }

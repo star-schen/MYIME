@@ -106,6 +106,15 @@ pub unsafe extern "C" fn myime_create(
     })
 }
 #[no_mangle]
+pub unsafe extern "C" fn myime_create_shared(shared: *const c_char,user: *const c_char,schema: *const c_char,learning: *const c_char,out: *mut *mut Core) -> i32 {
+    boundary(|| {
+        if out.is_null() { return Err("Null output handle".into()); } *out=ptr::null_mut();
+        let factory=Box::new(RimeFactory::shared(string(shared)?,string(user)?,string(learning)?));
+        let value=Box::new(Core { owner:thread::current().id(),inner:InputCore::new(factory,string(schema)?)? });
+        *out=Box::into_raw(value);Ok(())
+    })
+}
+#[no_mangle]
 pub unsafe extern "C" fn myime_destroy(p: *mut Core) -> i32 {
     boundary(|| {
         core(p)?;
@@ -121,6 +130,47 @@ pub unsafe extern "C" fn myime_ui_theme_id(p: *mut Core, out: *mut Text) -> i32 
         ptr::write(out, id.into());
         Ok(())
     })
+}
+#[repr(C)]
+pub struct InputPolicy { focus: u32, caps_lock: u32 }
+#[no_mangle]
+pub unsafe extern "C" fn myime_input_policy(p: *mut Core, out: *mut InputPolicy) -> i32 {
+    boundary(|| {
+        if out.is_null() { return Err("Null input policy output".into()); }
+        let c = &core(p)?.inner;
+        let focus = match c.input_policy("focus", "retain").as_str() { "cancel" => 1, "commit" => 2, _ => 0 };
+        let caps_lock = (c.input_policy("caps_lock", "compose_uppercase") == "commit_then_direct") as u32;
+        ptr::write(out, InputPolicy { focus, caps_lock }); Ok(())
+    })
+}
+#[no_mangle]
+pub unsafe extern "C" fn myime_commit_current(p: *mut Core) -> i32 { boundary(|| core(p)?.inner.commit_current()) }
+#[no_mangle]
+pub unsafe extern "C" fn myime_reload_config(p: *mut Core, path: *const c_char, enabled: *mut u32) -> i32 {
+    boundary(|| {
+        if enabled.is_null() { return Err("Null enabled output".into()); }
+        *enabled = core(p)?.inner.reload(std::path::Path::new(string(path)?))? as u32; Ok(())
+    })
+}
+#[repr(C)]
+pub struct LearningInfo { group: Text, group_count: usize, habits_enabled: u32 }
+#[no_mangle]
+pub unsafe extern "C" fn myime_learning_context(p: *mut Core, application: *const c_char, manual: *const c_char) -> i32 { boundary(|| core(p)?.inner.set_learning_context(string(application)?,string(manual)?)) }
+#[no_mangle]
+pub unsafe extern "C" fn myime_learning_info(p: *mut Core, out: *mut LearningInfo) -> i32 {
+    boundary(|| { if out.is_null() { return Err("Null learning info output".into()); } let c=&core(p)?.inner; ptr::write(out,LearningInfo {group:c.learning_group().into(),group_count:c.learning().groups.len(),habits_enabled:c.learning().habits_enabled as u32});Ok(()) })
+}
+#[no_mangle]
+pub unsafe extern "C" fn myime_learning_group(p: *mut Core, index: usize, id: *mut Text, name: *mut Text) -> i32 {
+    boundary(|| { if id.is_null() || name.is_null() { return Err("Null group output".into()); } let group=core(p)?.inner.learning().groups.get(index).ok_or("Group index out of range")?;ptr::write(id,group.id.as_str().into());ptr::write(name,group.name.as_str().into());Ok(()) })
+}
+#[no_mangle]
+pub extern "C" fn myime_learning_status() -> i32 { rime::storage_status() }
+#[no_mangle]
+pub extern "C" fn myime_learning_available() -> i32 { rime::learning_available() }
+#[no_mangle]
+pub unsafe extern "C" fn myime_maintain_learning(shared: *const c_char,user: *const c_char,learning: *const c_char,operation: i32,argument: *const c_char,result: *mut i32) -> i32 {
+    boundary(|| { if result.is_null() { return Err("Null maintenance output".into()); } *result=rime::maintain_learning(string(shared)?,string(user)?,string(learning)?,operation,string(argument)?)?;Ok(()) })
 }
 #[no_mangle]
 pub unsafe extern "C" fn myime_deploy(shared: *const c_char, user: *const c_char) -> i32 {

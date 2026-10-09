@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <array>
 #include <cwchar>
+#include <cstring>
+#include "platform_error.h"
 
 // Opt-in, bounded per-process file. Never call from DllMain or log input text.
 // A short OS file lock also serializes independent TSF apartments in this process.
@@ -79,6 +81,13 @@ public:
             UnlockFileEx(file,0,MAXDWORD,MAXDWORD,&lock);
         }
         CloseHandle(file);
+    }
+    void failure(const wchar_t* stage,const std::exception& error) const noexcept {
+        wchar_t detail[513]{},message[768]{};
+        const auto length=static_cast<int>(strnlen_s(error.what(),512));
+        if (length) MultiByteToWideChar(CP_UTF8,0,error.what(),length,detail,_countof(detail)-1);
+        _snwprintf_s(message,_countof(message),_TRUNCATE,L"%s: %s",stage,detail);
+        event(message,exception_result(error));
     }
     void module(const wchar_t* name) const noexcept {
         wchar_t path[32768]{};

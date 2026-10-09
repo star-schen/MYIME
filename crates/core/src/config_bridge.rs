@@ -388,12 +388,12 @@ fn apply_changes(
     for (key, value) in changes {
         if !matches!(
             key.as_str(),
-            "enabled" | "schema" | "theme" | "ascii_mode" | "full_shape" | "ascii_punct"
+            "enabled" | "schema" | "theme" | "ascii_mode" | "full_shape" | "ascii_punct" | "focus" | "caps_lock"
         ) {
             return Err(invalid(format!("Unknown editable setting: {key}")));
         }
         if !value.is_null() {
-            if matches!(key.as_str(), "schema" | "theme") {
+            if matches!(key.as_str(), "schema" | "theme" | "focus" | "caps_lock") {
                 let s = value
                     .as_str()
                     .ok_or_else(|| invalid(format!("{key} must be a string or null")))?;
@@ -413,6 +413,10 @@ fn apply_changes(
                     continue;
                 }
                 (ensure_table(layer, "ui")?, "theme")
+            }
+            "focus" | "caps_lock" => {
+                if value.is_null() && layer.get("input").is_none() { continue; }
+                (ensure_table(layer, "input")?, key)
             }
             "ascii_mode" | "full_shape" | "ascii_punct" => {
                 if value.is_null() && layer.get("options").is_none() {

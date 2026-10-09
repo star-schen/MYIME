@@ -1,28 +1,25 @@
-# MYIME 独立设置程序
+# MYIME 设置程序
 
-Windows x64、.NET Framework 4.8、C# 5 / WinForms。无需 NuGet 包、.NET SDK 或网络服务。
+Windows x64、.NET Framework 4.8、C# 5 / WinForms。设置与 `myime-tool.exe`、`myime-data-tool.exe`、`myime-learning-tool.exe`、`myime-theme-preview.exe` 配套发行。2026-10-06 本轮改动未构建、未测试、未启动界面。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-settings.ps1 -Configuration Release
-build/Release/myime-settings.exe
-```
+左侧使用可滚动模块树，右侧显示基础设置、候选主题、应用配置、学习与分组、词库维护、高级配置、Rime 配置和词库导入。具体规则由 Rust 工具维护，GUI 管理交互、草稿和用户主动操作。
 
-与 `myime-tool.exe`、`myime-data-tool.exe`、`myime-theme-preview.exe` 一起发行。
+候选主题下拉显示 name，自动刷新页面内图片。新建、另存、属性面板、TOML 编辑与草稿预览全部在皮肤编辑器中；用户覆盖保存在独立主题目录。详见 [皮肤说明](../../docs/themes.md)。
 
-- 基础设置编辑全局默认或 Windows 覆盖；空白 / 继承删除这一层的覆盖。
-- 应用配置只匹配 EXE 文件名。只编辑已知字段，未知扩展项由 Rust 工具保留。
-- 候选主题支持选择、原文编辑、内置主题的用户覆盖、新建模板和预览；校验与冲突规则由 Rust 工具处理，安装主题不会被覆盖。
-- 高级配置提供产品 TOML 原文编辑；语法损坏时仍可读取原文并修复。
-- Rime 配置编辑 `%LOCALAPPDATA%/MYIME/rime/patches/*.custom.yaml`，通过单独的维护工具部署和发布、回退上次发布或恢复基础数据。基础数据和运行中的 userdb 不被设置程序覆盖。
-- TXT/CSV 导入先预览，生成全新数据词库包；需要用户明确部署并启用新方案，不猜测编码、不直接修改 userdb。
-- “启用最近部署方案”只修改 Windows 配置层并核对返回的有效方案；AppProfile 的明确覆盖保留。恢复基础数据前，在基础设置的 Windows 覆盖中保存 `schema = 'pinyin_simp'`，并清理引用其他方案的 AppProfile；恢复 / 回退预检失败时不发布，也不自动修改配置。
-- “新模板名称”只用于新建主题模板；编辑已有主题的名称需修改主题 TOML 的 `name`。
-- 数据、日志和文档提供目录快捷入口。
+本版皮肤按全局背景、输入栏与候选栏的背景/字符层组织，使用不透明 RGB 绘制，不新增透明通道或效果层。预览在控件可见且句柄可用后启动，界面定时器统一回收任务结果；旧结果不会覆盖新选择，失败保留上一张图片，可手动重试。
 
-维护操作使用有大小和时间限制的 UTF-8 JSON stdin/stdout；输入法热路径不运行设置进程、不使用此 IPC。配置、Patch 和导入源使用 Rust 维护工具的修订契约。外部修改导致冲突时界面保留未保存内容并提示重新读取，没有静默覆盖。
+基础设置和编辑器可切换简繁界面语言、刷新语言包、打开用户语言包目录。参数面板的中文名称和下方说明随语言更新，草稿保留；语言栏菜单使用相同资源。语言包只影响界面，不改变输入输出简繁。详见 [语言包接口](../../docs/languages.md)。
 
-普通运行不自动创建或修改产品配置。只在用户点击保存、生成词库包、部署或目录按钮时执行对应操作。保存配置后重启目标应用，不自动安装、注销输入法或替换 DLL。
+应用配置的“同 Windows 设置”明确指本程序基础设置中的 Windows 通用配置；Windows 层显示“同全局默认”，全局层显示“使用软件默认”。学习分组和 AI 分组表格统一根据字体调整表头/行高，列有最小宽度和完整内容提示；学习页按钮、说明、表格采用独立行布局。
 
-`--data-root <绝对路径>` 用于显式的独立数据目录。系统 DPI aware，基础缩放由 WinForms 处理；混合 DPI 屏幕移动仍需真实机器复测。
+基础设置提供 retain/cancel/commit 三种跨应用策略、候选内大写/提交后直输两种 Caps Lock 策略。AppProfile 匹配 EXE 文件名；学习分组映射则匹配完整 EXE 路径，两种配置职责不同，不猜测应用分类。
 
-`--self-check` 在可执行文件旁创建和清理自己独有的 fixture，不读取普通用户配置；检查真实维护工具的读写、继承、AppProfile、冲突、未知字段保留、YAML、主题模板/保存、导入预览/数据包和异步完成。透明、无激活窗口通过 `DrawToBitmap` 输出六页到 `test-artifacts/settings-*.png`，不进行真实应用或输入法安装验收。
+保存产品配置和皮肤后在后台发布已知产品字段与主题，并通知运行中的输入法。皮肤即时更新，输入方案在当前组合结束后更新；新部署的数据代仍需重开应用。发布失败会保留本地保存结果并显示错误。首次新版安装后需注销再登录以更新共享数据组权限。
+
+学习默认使用全局数据，工作/日常/自定义标签保留。词库维护由用户手动启动，可合并未占用的旧槽、在线备份和被动 checkpoint；没有常驻维护进程。大量旧词库合并建议暂停输入后执行。
+
+AI 默认关闭，启用后仍需用户打开建议窗口、勾选待分析应用并点击请求；结果只更新经确认的草稿，保存学习设置后生效。兼容本机 llama.cpp 的 OpenAI-compatible 接口或在线 HTTPS API，只发送应用名、目录及用户定义的组。API key 通过 Windows DPAPI CurrentUser 存在本机工具目录，不发布给 Host；不读取或发送输入正文/词库。
+
+维护 IPC 有时间和大小上限，不进入输入按键路径。使用 `--data-root <绝对路径>` 可指定编辑目录；已安装环境的展示和学习发布范围仍是当前 Windows 用户。
+
+历史 `--self-check` 为独立 fixture 的有限自检入口，不覆盖新增功能；本轮没有运行。源码级移除的旧主题页控件不应继续作为验收依据。用户验收步骤见 [本版验收](../../docs/feature-acceptance.md)。

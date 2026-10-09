@@ -11,6 +11,7 @@ class ThemeCatalog {
     HMODULE module_=nullptr;
     std::filesystem::path user_,installed_;
     decltype(&myime_theme_resolve) resolve_=nullptr;
+    decltype(&myime_theme_parse) parse_=nullptr;
     decltype(&myime_theme_view) view_=nullptr;
     decltype(&myime_theme_destroy) destroy_=nullptr;
     decltype(&myime_last_error) error_=nullptr;
@@ -21,7 +22,7 @@ public:
     ~ThemeCatalog() { close(); }
     void close() noexcept {
         if (module_) FreeLibrary(module_);
-        module_=nullptr; resolve_=nullptr; view_=nullptr; destroy_=nullptr; error_=nullptr;
+        module_=nullptr; resolve_=nullptr; parse_=nullptr; view_=nullptr; destroy_=nullptr; error_=nullptr;
     }
     void open(const std::filesystem::path& module_dir,const std::filesystem::path& data_root) {
         close(); user_=data_root/L"themes"; installed_=module_dir/L"themes";
@@ -29,18 +30,28 @@ public:
         if (!module_) throw std::runtime_error("Cannot load theme library");
         auto version=reinterpret_cast<decltype(&myime_theme_abi_version)>(GetProcAddress(module_,"myime_theme_abi_version"));
         resolve_=reinterpret_cast<decltype(resolve_)>(GetProcAddress(module_,"myime_theme_resolve"));
+        parse_=reinterpret_cast<decltype(parse_)>(GetProcAddress(module_,"myime_theme_parse"));
         view_=reinterpret_cast<decltype(view_)>(GetProcAddress(module_,"myime_theme_view"));
         destroy_=reinterpret_cast<decltype(destroy_)>(GetProcAddress(module_,"myime_theme_destroy"));
         error_=reinterpret_cast<decltype(error_)>(GetProcAddress(module_,"myime_last_error"));
-        if (!version || version()!=1 || !resolve_ || !view_ || !destroy_ || !error_) {
+        if (!version || version()!=2 || !resolve_ || !parse_ || !view_ || !destroy_ || !error_) {
             close(); throw std::runtime_error("Theme ABI mismatch");
         }
+    }
+    CandidateTheme parse(const std::string& text) const {
+        MyimeTheme* handle=nullptr;
+        if (!module_ || parse_(text.c_str(),&handle)) throw std::runtime_error(module_?error_():"Theme catalog not open");
+        return copy(handle);
     }
     CandidateTheme resolve(const std::wstring& id) const {
         if (!module_) throw std::runtime_error("Theme catalog not open");
         MyimeTheme* handle=nullptr;
         if (resolve_(utf8(id).c_str(),utf8(user_.wstring()).c_str(),utf8(installed_.wstring()).c_str(),&handle))
             throw std::runtime_error(error_());
+        return copy(handle);
+    }
+private:
+    CandidateTheme copy(MyimeTheme* handle) const {
         struct Owner { MyimeTheme* value; decltype(&myime_theme_destroy) release; ~Owner() { release(value); } } owner{handle,destroy_};
         MyimeThemeView view{};
         if (view_(handle,sizeof(view),&view)) throw std::runtime_error(error_());
@@ -49,6 +60,7 @@ public:
         result.style.font_family={}; result.style.warning={};
         return result;
     }
+public:
     std::vector<std::wstring> ids() const {
         std::set<std::wstring> ids{L"default"};
         for (const auto& root:{installed_,user_}) {

@@ -8,6 +8,15 @@ unsafe fn handle<'a>(p: *mut ThemeHandle) -> Result<&'a ThemeHandle, String> {
     Ok(handle)
 }
 #[repr(C)]
+pub struct BackgroundLayerView { color: u32, border: u32, border_width: u32, border_radius: u32 }
+impl From<&theme::BackgroundLayer> for BackgroundLayerView {
+    fn from(value: &theme::BackgroundLayer) -> Self { Self { color: value.color, border: value.border, border_width: value.border_width, border_radius: value.border_radius } }
+}
+#[repr(C)]
+pub struct InputCardView { background: BackgroundLayerView, text: u32, caret: u32 }
+#[repr(C)]
+pub struct CandidateCardView { background: BackgroundLayerView, text: u32, muted: u32, label: u32, highlight: u32, highlight_text: u32 }
+#[repr(C)]
 pub struct ThemeView {
     id: Text, name: Text, version: Text, description: Text, font_family: Text, warning: Text,
     font_size: u32, font_weight: u32, horizontal: u32,
@@ -16,9 +25,20 @@ pub struct ThemeView {
     background: u32, text: u32, muted: u32, label: u32, highlight: u32, highlight_text: u32, border: u32,
     shadow: u32, shadow_size: u32, shadow_opacity: u32,
     preedit: u32, comments: u32, labels: u32, page_controls: u32,
+    input: InputCardView, candidates: CandidateCardView,
 }
 #[no_mangle]
-pub extern "C" fn myime_theme_abi_version() -> u32 { 1 }
+pub extern "C" fn myime_theme_abi_version() -> u32 { 2 }
+#[no_mangle]
+pub unsafe extern "C" fn myime_theme_parse(text: *const c_char, out: *mut *mut ThemeHandle) -> i32 {
+    boundary(|| {
+        if out.is_null() { return Err("Null theme output handle".into()); }
+        *out = ptr::null_mut();
+        let resolved = ResolvedTheme { theme: theme::Theme::parse(string(text)?)?, warning: String::new() };
+        *out = Box::into_raw(Box::new(ThemeHandle { owner: thread::current().id(), resolved }));
+        Ok(())
+    })
+}
 #[no_mangle]
 pub unsafe extern "C" fn myime_theme_resolve(
     id: *const c_char, user_root: *const c_char, installed_root: *const c_char,
@@ -50,6 +70,9 @@ pub unsafe extern "C" fn myime_theme_view(p: *mut ThemeHandle, out_size: usize, 
             shadow: t.shadow as u32, shadow_size: t.shadow_size, shadow_opacity: t.shadow_opacity,
             preedit: t.preedit as u32, comments: t.comments as u32, labels: t.labels as u32,
             page_controls: t.page_controls as u32,
+            input: InputCardView { background: (&t.input.background).into(), text: t.input.text, caret: t.input.caret },
+            candidates: CandidateCardView { background: (&t.candidates.background).into(), text: t.candidates.text,
+                muted: t.candidates.muted, label: t.candidates.label, highlight: t.candidates.highlight, highlight_text: t.candidates.highlight_text },
         });
         Ok(())
     })

@@ -15,15 +15,27 @@ void text(HDC dc,const std::wstring& value,RECT r,COLORREF color) {
     SetTextColor(dc,color);
     DrawTextW(dc,value.data(),static_cast<int>(value.size()),&r,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX);
 }
+void card(HDC dc,RECT bounds,COLORREF background,COLORREF border,int width,int radius) {
+    if(bounds.right<=bounds.left || bounds.bottom<=bounds.top)return;
+    if(!width && !radius){fill(dc,bounds,background);return;}
+    radius=std::min({radius,static_cast<int>(bounds.right-bounds.left)/2,static_cast<int>(bounds.bottom-bounds.top)/2});
+    HBRUSH brush=CreateSolidBrush(background); HPEN pen=width?CreatePen(PS_SOLID,width,border):nullptr;
+    if(!brush || (width && !pen)){if(brush)DeleteObject(brush);if(pen)DeleteObject(pen);fill(dc,bounds,background);return;}
+    auto old_brush=SelectObject(dc,brush),old_pen=SelectObject(dc,pen?pen:GetStockObject(NULL_PEN));
+    const int inset=width/2;
+    RoundRect(dc,bounds.left+inset,bounds.top+inset,bounds.right-(width+1)/2,bounds.bottom-(width+1)/2,2*radius,2*radius);
+    SelectObject(dc,old_pen);SelectObject(dc,old_brush);if(pen)DeleteObject(pen);DeleteObject(brush);
 }
-bool CandidateWindow::create(HINSTANCE module,void* owner,Action action,const CandidateTheme& theme) {
+}
+bool CandidateWindow::create(HINSTANCE module,void* owner,Action action,const CandidateTheme& theme,HWND window_owner) {
     destroy(); owner_=owner; action_=action; set_theme(theme);
+    if(window_owner)window_owner=GetAncestor(window_owner,GA_ROOT);
     WNDCLASSW wc{}; wc.lpfnWndProc=procedure; wc.hInstance=module; wc.lpszClassName=kClass; wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);
     if (!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) return false;
     module_=module; InterlockedIncrement(&window_classes);
     // Inherit caller DPI awareness, keeping TSF caret and popup coordinates
     // consistent. Never change a hosting application's process/thread context.
-    window_=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|WS_EX_TOPMOST,kClass,L"",WS_POPUP,0,0,1,1,nullptr,nullptr,module,this);
+    window_=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|WS_EX_TOPMOST,kClass,L"",WS_POPUP,0,0,1,1,window_owner,nullptr,module,this);
     if (!window_) { destroy(); return false; }
     dpi_=GetDpiForWindow(window_); if (!dpi_) dpi_=96;
     return true;
@@ -32,9 +44,14 @@ void CandidateWindow::hide() {
     if (shadow_) ShowWindow(shadow_,SW_HIDE);
     if (visible()) { NotifyWinEvent(EVENT_OBJECT_IME_HIDE,window_,OBJID_CLIENT,CHILDID_SELF); ShowWindow(window_,SW_HIDE); }
 }
-void CandidateWindow::set_parent(HWND parent) {
-    for (HWND window:{window_,shadow_}) if (window && reinterpret_cast<HWND>(GetWindowLongPtrW(window,GWLP_HWNDPARENT))!=parent)
-        SetWindowLongPtrW(window,GWLP_HWNDPARENT,reinterpret_cast<LONG_PTR>(parent));
+bool CandidateWindow::set_parent(HWND parent) {
+    if (parent) parent=GetAncestor(parent,GA_ROOT);
+    for (HWND window:{window_,shadow_}) if (window && GetWindow(window,GW_OWNER)!=parent) {
+        SetLastError(ERROR_SUCCESS);
+        const auto old=SetWindowLongPtrW(window,GWLP_HWNDPARENT,reinterpret_cast<LONG_PTR>(parent));
+        if ((!old && GetLastError()!=ERROR_SUCCESS) || GetWindow(window,GW_OWNER)!=parent) return false;
+    }
+    return true;
 }
 void CandidateWindow::clear_buffer() noexcept {
     if (buffer_ && old_bitmap_) SelectObject(buffer_,old_bitmap_);
@@ -68,38 +85,41 @@ void CandidateWindow::layout(int max_width,int max_height) {
     const int edge=px(s.padding_x)+std::max(high_contrast_?1:0,px(s.border_width));
     const int top=px(s.padding_y)+std::max(high_contrast_?1:0,px(s.border_width));
     const int gap=px(s.spacing),cx=px(s.candidate_padding_x),cy=px(s.candidate_padding_y);
-    width_=std::max(1,std::min(max_width,px(s.max_width))); const int available=std::max(1,width_-2*edge);
+    const int ib=px(s.input.background.border_width),cb=snapshot_.rows.empty()?0:px(s.candidates.background.border_width);
+    width_=std::max(1,std::min(max_width,px(s.max_width))); const int available=std::max(1,width_-2*edge-2*cb);
     std::vector<int> widths; widths.reserve(snapshot_.rows.size());
-    int widest=s.preedit?measure(snapshot_.preedit):0;
+    int widest=s.preedit?measure(snapshot_.preedit)+2*ib:0;
     for (const auto& row:snapshot_.rows) {
         int w=measure(row.text)+2*cx;
         if (s.labels && !row.label.empty()) w+=measure(row.label)+cx;
         if (s.comments && !row.comment.empty()) w+=measure(row.comment)+cx;
-        widths.push_back(std::clamp(w,1,available)); widest=std::max(widest,w);
+        widths.push_back(std::clamp(w,1,available)); widest=std::max(widest,w+2*cb);
     }
     if (!s.horizontal) width_=std::min(width_,std::max(px(s.min_width),widest+2*edge));
     else {
-        long long total=2*edge;
+        long long total=2*edge+2*cb;
         for (int w:widths) total+=w+gap;
         width_=std::min(width_,std::max(px(s.min_width),static_cast<int>(std::min<long long>(total,width_))));
     }
-    const int rh=text_height_+2*cy; cells_.clear(); cells_.reserve(widths.size()); int x=edge,y=0;
+    const int rh=text_height_+2*cy; cells_.clear(); cells_.reserve(widths.size()); int x=edge+cb,y=0;
     // Wrapping changes geometry only; Rime page and local indexes stay intact.
     for (int w:widths) {
-        if (s.horizontal && x>edge && x+w>width_-edge) { x=edge; y+=rh+gap; }
-        cells_.push_back({x,y,s.horizontal?x+w:width_-edge,y+rh});
+        if (s.horizontal && x>edge+cb && x+w>width_-edge-cb) { x=edge+cb; y+=rh+gap; }
+        cells_.push_back({x,y,s.horizontal?x+w:width_-edge-cb,y+rh});
         if (s.horizontal) x+=w+gap; else y+=rh+gap;
     }
     content_height_=cells_.empty()?0:cells_.back().bottom;
-    const int hh=s.preedit && !snapshot_.preedit.empty()?text_height_+cy+gap:0;
+    const int hh=s.preedit && !snapshot_.preedit.empty()?text_height_+cy+2*ib+gap:0;
     const int fh=s.page_controls && !snapshot_.rows.empty()?text_height_+cy+gap:0;
-    height_=std::max(1,std::min(max_height,2*top+hh+content_height_+fh));
-    header_={edge,top,width_-edge,top+hh};
-    viewport_={edge,top+hh,width_-edge,std::max(top+hh,height_-top-fh)};
-    footer_={edge,height_-top-fh,width_-edge,height_-top}; previous_button_=next_button_={};
+    height_=std::max(1,std::min(max_height,2*top+hh+2*cb+content_height_+fh));
+    input_card_=hh?RECT{edge,top,width_-edge,top+hh-gap}:RECT{};
+    header_=hh?RECT{edge+ib,top+ib,width_-edge-ib,top+hh-gap-ib}:RECT{};
+    candidate_card_=snapshot_.rows.empty()?RECT{}:RECT{edge,top+hh,width_-edge,height_-top};
+    viewport_={edge+cb,top+hh+cb,width_-edge-cb,std::max(top+hh+cb,height_-top-fh-cb)};
+    footer_={edge+cb,height_-top-fh-cb,width_-edge-cb,height_-top-cb}; previous_button_=next_button_={};
     if (fh) {
-        const int button=std::min(text_height_+2*cx,(width_-2*edge)/3);
-        previous_button_={edge,footer_.top,edge+button,footer_.bottom}; next_button_={width_-edge-button,footer_.top,width_-edge,footer_.bottom};
+        const int button=std::min(text_height_+2*cx,(width_-2*edge-2*cb)/3);
+        previous_button_={edge+cb,footer_.top,edge+cb+button,footer_.bottom}; next_button_={width_-edge-cb-button,footer_.top,width_-edge-cb,footer_.bottom};
     }
     const int vh=std::max(0,static_cast<int>(viewport_.bottom-viewport_.top)); scroll_=std::clamp(scroll_,0,std::max(0,content_height_-vh));
     if (snapshot_.selected<cells_.size()) {
@@ -150,11 +170,44 @@ void CandidateWindow::present(CandidatePresentation view,RECT caret) {
     }
     if (!shown || moved || redraw_shadow) update_shadow(x,y,redraw_shadow);
     if (!shown || moved) {
-        SetWindowPos(window_,HWND_TOPMOST,x,y,width_,height_,SWP_NOACTIVATE|(shown?0:SWP_SHOWWINDOW));
+        if (!SetWindowPos(window_,HWND_TOPMOST,x,y,width_,height_,SWP_NOACTIVATE|(shown?0:SWP_SHOWWINDOW))) {
+            laying_out_=false; hide(); throw std::runtime_error("Candidate positioning failed");
+        }
         NotifyWinEvent(shown?EVENT_OBJECT_IME_CHANGE:EVENT_OBJECT_IME_SHOW,window_,OBJID_CLIENT,CHILDID_SELF);
     }
-    if (!shown || moved || changed || style_dirty_) InvalidateRect(window_,nullptr,FALSE);
+    const bool redraw=!shown || moved || changed || style_dirty_;
     style_dirty_=false; laying_out_=false;
+    if (redraw) { InvalidateRect(window_,nullptr,FALSE); UpdateWindow(window_); }
+}
+HBITMAP CandidateWindow::render_image(const CandidateTheme& theme,CandidatePresentation view,int max_width,int max_height,UINT dpi,SIZE* size) {
+    if (window_ || !size || max_width<80 || max_height<80 || max_width>4096 || max_height>4096 || dpi<48 || dpi>768)
+        throw std::runtime_error("Invalid offscreen rendering bounds");
+    set_theme(theme); snapshot_=std::move(view); dpi_=dpi; high_contrast_=false;
+    const int margin=std::min({theme.style.shadow?px(theme.style.shadow_size):0,(max_width-80)/2,(max_height-80)/2});
+    layout(max_width-2*margin,max_height-2*margin);
+    BITMAPINFO info{}; info.bmiHeader={sizeof(BITMAPINFOHEADER),width_,-height_,1,32,BI_RGB};
+    HDC dc=CreateCompatibleDC(nullptr); void* bits=nullptr;
+    HBITMAP bitmap=dc?CreateDIBSection(dc,&info,DIB_RGB_COLORS,&bits,nullptr,0):nullptr;
+    if (!bitmap) { if (dc) DeleteDC(dc); throw std::runtime_error("Cannot allocate preview image"); }
+    const auto old=SelectObject(dc,bitmap);
+    try { paint(dc); }
+    catch (...) { SelectObject(dc,old); DeleteObject(bitmap); DeleteDC(dc); throw; }
+    GdiFlush();SelectObject(dc,old);DeleteDC(dc);
+    const int width=width_+2*margin,height=height_+2*margin;
+    info.bmiHeader.biWidth=width;info.bmiHeader.biHeight=-height;
+    void* output=nullptr;HBITMAP result=CreateDIBSection(nullptr,&info,DIB_RGB_COLORS,&output,nullptr,0);
+    if(!result){DeleteObject(bitmap);throw std::runtime_error("Cannot allocate preview border and shadow");}
+    const auto pixels=static_cast<const uint32_t*>(bits);auto destination=static_cast<uint32_t*>(output);
+    const double radius=std::min({px(theme.style.border_radius),width_/2,height_/2});
+    auto distance=[&](double x,double y){const double qx=std::abs(x-width_/2.0)-(width_/2.0-radius),qy=std::abs(y-height_/2.0)-(height_/2.0-radius);return std::hypot(std::max(qx,0.0),std::max(qy,0.0))+std::min(std::max(qx,qy),0.0)-radius;};
+    for(int y=0;y<height;y++)for(int x=0;x<width;x++) {
+        const int local_x=x-margin,local_y=y-margin;uint32_t shade=245;
+        if(margin && theme.style.shadow_opacity){const double fade=std::clamp(1.0-std::max(distance(local_x,local_y-px(2)),0.0)/margin,0.0,1.0);shade=static_cast<uint32_t>(245*(255-theme.style.shadow_opacity*fade*fade)/255);}
+        uint32_t pixel=0xff000000u|(shade<<16)|(shade<<8)|shade;
+        if(local_x>=0&&local_x<width_&&local_y>=0&&local_y<height_&&distance(local_x+0.5,local_y+0.5)<=0)pixel=0xff000000u|pixels[static_cast<size_t>(local_y)*width_+local_x];
+        destination[static_cast<size_t>(y)*width+x]=pixel;
+    }
+    DeleteObject(bitmap);*size={width,height};return result;
 }
 void CandidateWindow::update_shadow(int x,int y,bool redraw) {
     const auto& s=theme_.style; const int margin=px(s.shadow_size);
@@ -192,19 +245,23 @@ void CandidateWindow::paint(HDC screen) {
     }
     HDC dc=bitmap_?buffer_:screen;
     const auto bg=high_contrast_?GetSysColor(COLOR_WINDOW):color(s.background);
-    const auto fg=high_contrast_?GetSysColor(COLOR_WINDOWTEXT):color(s.text);
-    const auto muted=high_contrast_?fg:color(s.muted);
-    const auto highlight=high_contrast_?GetSysColor(COLOR_HIGHLIGHT):color(s.highlight);
-    const auto selected_text=high_contrast_?GetSysColor(COLOR_HIGHLIGHTTEXT):color(s.highlight_text);
+    const auto fg=high_contrast_?GetSysColor(COLOR_WINDOWTEXT):color(s.candidates.text);
+    const auto muted=high_contrast_?fg:color(s.candidates.muted);
+    const auto highlight=high_contrast_?GetSysColor(COLOR_HIGHLIGHT):color(s.candidates.highlight);
+    const auto selected_text=high_contrast_?GetSysColor(COLOR_HIGHLIGHTTEXT):color(s.candidates.highlight_text);
     RECT bounds{0,0,width_,height_}; fill(dc,bounds,bg);
+    // Opaque background, two opaque cards, then their text. No capture/effects.
+    card(dc,input_card_,high_contrast_?bg:color(s.input.background.color),high_contrast_?fg:color(s.input.background.border),px(s.input.background.border_width),px(s.input.background.border_radius));
+    card(dc,candidate_card_,high_contrast_?bg:color(s.candidates.background.color),high_contrast_?fg:color(s.candidates.background.border),px(s.candidates.background.border_width),px(s.candidates.background.border_radius));
     auto old=SelectObject(dc,font_); SetBkMode(dc,TRANSPARENT);
     if (header_.bottom>header_.top) {
-        text(dc,snapshot_.preedit,header_,fg); SIZE prefix{}; const auto length=std::min(snapshot_.caret,snapshot_.preedit.size());
+        text(dc,snapshot_.preedit,header_,high_contrast_?fg:color(s.input.text)); SIZE prefix{}; const auto length=std::min(snapshot_.caret,snapshot_.preedit.size());
         GetTextExtentPoint32W(dc,snapshot_.preedit.data(),static_cast<int>(length),&prefix);
         const LONG x=std::min(header_.right-1,header_.left+prefix.cx+1);
-        RECT caret{x,header_.top+px(2),x+1,header_.top+text_height_-px(2)}; fill(dc,caret,muted);
+        RECT caret{x,header_.top+px(2),x+1,header_.top+text_height_-px(2)}; fill(dc,caret,high_contrast_?fg:color(s.input.caret));
     }
     const int saved=SaveDC(dc); IntersectClipRect(dc,viewport_.left,viewport_.top,viewport_.right,viewport_.bottom);
+    if(s.candidates.background.border_radius){const int radius=px(s.candidates.background.border_radius);HRGN clip=CreateRoundRectRgn(candidate_card_.left,candidate_card_.top,candidate_card_.right+1,candidate_card_.bottom+1,2*radius,2*radius);if(clip){ExtSelectClipRgn(dc,clip,RGN_AND);DeleteObject(clip);}}
     for (size_t i=0;i<snapshot_.rows.size();++i) {
         auto r=candidate_bounds(i); if (r.bottom<=viewport_.top || r.top>=viewport_.bottom) continue;
         const bool selected=i==snapshot_.selected; if (selected) fill(dc,r,highlight);
@@ -213,7 +270,7 @@ void CandidateWindow::paint(HDC screen) {
             text(dc,v,r,tint); SIZE size{}; GetTextExtentPoint32W(dc,v.data(),static_cast<int>(v.size()),&size);
             r.left=std::min(r.right,r.left+size.cx+px(s.candidate_padding_x));
         };
-        if (s.labels && !row.label.empty()) part(row.label,selected?selected_text:(high_contrast_?fg:color(s.label)));
+        if (s.labels && !row.label.empty()) part(row.label,selected?selected_text:(high_contrast_?fg:color(s.candidates.label)));
         part(row.text,selected?selected_text:fg);
         if (s.comments && !row.comment.empty()) part(row.comment,selected?selected_text:muted);
     }

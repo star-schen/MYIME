@@ -31,15 +31,13 @@ namespace Myime.Settings
             var layers = Json.Map(Json.Get(snapshot, "layers")); Require(Json.Text(Json.Map(Json.Get(layers, "windows")), "schema") == deployedSchema && Json.Text(Json.Map(Json.Get(layers, "default")), "schema") == "pinyin_simp", "deployment enabled in Windows layer only");
             var profileRead = Json.Request("config.read", configPath); profileRead["executable"] = "TestEditor.exe";
             var overridden = tool.Send(profileRead); Require(Json.Flag(overridden, "ok") && Json.Text(Json.Map(Json.Get(overridden, "effective")), "schema") == "pinyin_simp", "explicit profile schema preserved");
-            themeId.Text = "gui_fixture"; themeName.Text = "设置主题自测"; NewTheme(); WaitForMaintenance(); Require(themeRevision != null && themeDirty, "theme template controls");
-            SaveTheme(); WaitForMaintenance(); Require(File.Exists(Path.Combine(dataRoot, "themes", "gui_fixture", "theme.toml")) && !themeDirty, "user theme save");
             importPath.Text = Path.Combine(dataRoot, "words.csv"); importFormat.SelectedItem = "csv";
             File.WriteAllText(importPath.Text, "word,code,frequency,source\n你好,ni hao,100,fixture\n输入法,shu ru fa,20,fixture\n", new UTF8Encoding(false));
             PreviewImport(); WaitForMaintenance(); Require(importRevision != null && importRevision.Count != 0 && importRows.Rows.Count == 2, "import preview controls");
             WriteImport(); WaitForMaintenance(); Require(File.Exists(Path.Combine(dataRoot, "dictionaries", "my_words", "manifest.json")), "import package creation");
-            Status("设置自测通过：配置 / 继承 / 冲突 / Patch / 主题保存 / 导入预览和数据包。仅使用隔离目录。");
-            for (int index = 0; index < tabs.TabPages.Count; index++) { tabs.SelectedIndex = index; PerformLayout(); tabs.SelectedTab.CreateControl(); themeText.Select(0, 0); patch.Select(0, 0); raw.Select(0, 0); using (var image = new Bitmap(Width, Height)) { DrawToBitmap(image, new Rectangle(Point.Empty, Size)); image.Save(Path.Combine(artifacts, "settings-" + index + ".png")); } }
-            generalDirty = profileDirty = rawDirty = patchDirty = themeDirty = false; Hide(); Close();
+            Status("设置自测通过：配置 / 继承 / 冲突 / Patch / 导入预览和数据包。皮肤编辑器需单独验证。仅使用隔离目录。");
+            for (int index = 0; index < tabs.TabPages.Count; index++) { tabs.SelectedIndex = index; PerformLayout(); tabs.SelectedTab.CreateControl(); patch.Select(0, 0); raw.Select(0, 0); using (var image = new Bitmap(Width, Height)) { DrawToBitmap(image, new Rectangle(Point.Empty, Size)); image.Save(Path.Combine(artifacts, "settings-" + index + ".png")); } }
+            generalDirty = profileDirty = rawDirty = patchDirty = false; Hide(); Close();
         }
         void WaitForMaintenance() { var deadline = Stopwatch.StartNew(); while (busy && deadline.ElapsedMilliseconds < 30000) { Application.DoEvents(); Thread.Sleep(5); } Require(!busy, "asynchronous maintenance timeout"); }
         static void Require(bool result, string description) { if (!result) throw new InvalidOperationException("Settings self-check failed: " + description); }

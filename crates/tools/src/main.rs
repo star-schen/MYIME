@@ -51,7 +51,7 @@ fn config_response(snapshot: Snapshot, executable: &str) -> Value {
                 .map(|p| serde_json::to_value(p).unwrap_or(Value::Null))
                 .unwrap_or_else(|| json!({}));
             json!({"revision":snapshot.revision,"text":snapshot.text,"backup_path":snapshot.backup_path,"valid":true,
-                "effective":{"schema":effective.schema,"enabled":effective.enabled,"theme":effective.theme_id(),"options":effective.options},"profiles":profiles,"layers":{"default":default,"windows":windows}})
+                "effective":{"schema":effective.schema,"enabled":effective.enabled,"theme":effective.theme_id(),"options":effective.options},"profiles":profiles,"layers":{"default":default,"windows":windows},"learning":config.learning().expect("Validated learning config")})
         }
         Err(message) => {
             json!({"revision":snapshot.revision,"text":snapshot.text,"backup_path":snapshot.backup_path,"valid":false,"validation_error":message,"effective":null,"profiles":[],"layers":{"default":{},"windows":{}}})
@@ -221,6 +221,82 @@ fn dispatch(request: &Value) -> Result<Value, BridgeError> {
         .and_then(Value::as_str)
         .unwrap_or("");
     match command {
+        "learning.update" => {
+            let path=Path::new(field(request,"path")?);let snapshot=config_bridge::read_snapshot(path,MAX_CONFIG_BYTES)?;
+            let mut document=snapshot.text.parse::<toml_edit::DocumentMut>().map_err(|e|error("invalid",e.to_string()))?;
+            let input=request.get("learning").ok_or_else(||error("invalid","learning is required"))?;
+            let policy:myime_core::learning::Learning=serde_json::from_value(input.clone()).map_err(|e|error("invalid",e.to_string()))?;
+            let serialized=toml::to_string(&policy).map_err(|e|error("invalid",e.to_string()))?;
+            let changes=serialized.parse::<toml_edit::DocumentMut>().map_err(|e|error("invalid",e.to_string()))?;
+            if document.get("learning").is_none(){document.insert("learning",toml_edit::Item::Table(toml_edit::Table::new()));}
+            let target=document.get_mut("learning").and_then(toml_edit::Item::as_table_mut).ok_or_else(||error("invalid","learning must be a table"))?;
+            for key in ["habits_enabled","ai_enabled","groups","applications"] { if let Some(value)=changes.get(key){target.insert(key,value.clone());}else{target.remove(key);} }
+            let text=document.to_string();config_bridge::validate_product_text(&text)?;
+            Ok(config_response(config_bridge::save_text(path,&expected(request)?,&text,MAX_CONFIG_BYTES)?,executable))
+        },
+        "config.presentation" => {
+            fn layer(value: &toml::Value) -> toml::Value {
+                let mut projected = toml::Table::new();
+                if let Some(table) = value.as_table() {
+                    for key in ["schema", "enabled", "options"] { if let Some(value) = table.get(key) { projected.insert(key.into(), value.clone()); } }
+                    for (section, keys) in [("ui", &["theme"][..]), ("input", &["focus", "caps_lock"][..])] {
+                        if let Some(values) = table.get(section).and_then(toml::Value::as_table) {
+                            let known = toml::Table::from_iter(keys.iter().filter_map(|key|values.get(*key).map(|value|((*key).into(),value.clone()))));
+                            if !known.is_empty() { projected.insert(section.into(),toml::Value::Table(known)); }
+                        }
+                    }
+                }
+                toml::Value::Table(projected)
+            }
+            let snapshot = config_bridge::read_snapshot(Path::new(field(request,"path")?), MAX_CONFIG_BYTES)?;
+            let config=Config::parse(&snapshot.text).map_err(|e| error("invalid",e))?;
+            let source = config.document();
+            let mut projected = toml::Table::new();
+            if let Some(value) = source.get("default") { projected.insert("default".into(), layer(value)); }
+            if let Some(value) = source.get("platform").and_then(|v|v.get("windows")) { projected.insert("platform".into(), toml::Value::Table(toml::Table::from_iter([("windows".into(),layer(value))]))); }
+            if let Some(values) = source.get("profiles").and_then(toml::Value::as_array) {
+                let profiles = values.iter().map(|entry| {
+                    let mut value = toml::Table::new(); if let Some(executable) = entry.get("executable") { value.insert("executable".into(), executable.clone()); }
+                    if let Some(overrides) = entry.get("overrides") { value.insert("overrides".into(), layer(overrides)); } toml::Value::Table(value)
+                }).collect(); projected.insert("profiles".into(), toml::Value::Array(profiles));
+            }
+            projected.insert("learning".into(),toml::Value::try_from(config.learning().map_err(|e|error("invalid",e))?).map_err(|e|error("invalid",e.to_string()))?);
+            Ok(json!({"text":toml::to_string(&projected).map_err(|e|error("invalid",e.to_string()))?}))
+        },
+        "config.apply_theme" => {
+            let path = Path::new(field(request,"path")?); let revision = expected(request)?;
+            let snapshot = config_bridge::read_snapshot(path,MAX_CONFIG_BYTES)?;
+            let changes = serde_json::Map::from_iter([("theme".into(),Value::String(field(request,"theme")?.into()))]);
+            let updated = config_bridge::update_product_text(&snapshot.text,"default",None,&changes)?;
+            let inherited = config_bridge::update_product_text(&updated,"windows",None,&serde_json::Map::from_iter([("theme".into(),Value::Null)]))?;
+            Ok(config_response(config_bridge::save_text(path,&revision,&inherited,MAX_CONFIG_BYTES)?,executable))
+        },
+        "theme.describe" => myime_core::theme_editor::describe(field(request,"text")?),
+        "theme.edit" => {
+            let changes=request.get("changes").and_then(Value::as_object)
+                .ok_or_else(||error("protocol","changes must be an object"))?;
+            Ok(json!({"text":myime_core::theme_editor::edit(field(request,"text")?,changes)?}))
+        },
+        "theme.catalog" => {
+            let user=Path::new(field(request,"user_root")?); let installed=Path::new(field(request,"installed_root")?);
+            if !user.is_absolute() || !installed.is_absolute() { return Err(error("invalid","Catalog roots must be absolute")); }
+            let mut ids=std::collections::BTreeSet::from(["default".to_string()]);
+            for root in [installed,user] {
+                if let Ok(entries)=std::fs::read_dir(root) {
+                    for entry in entries.flatten().take(1024) {
+                        if let Some(id)=entry.file_name().to_str().filter(|id|myime_core::theme::valid_id(id)) {
+                            if entry.path().join("theme.toml").is_file() { ids.insert(id.into()); }
+                        }
+                        if ids.len()>=128 { break; }
+                    }
+                }
+            }
+            let themes:Vec<_>=ids.into_iter().map(|id| {
+                let resolved=myime_core::theme::resolve(&id,user,installed);
+                json!({"id":id,"name":resolved.theme.name,"warning":resolved.warning})
+            }).collect();
+            Ok(json!({"themes":themes}))
+        },
         "config.check-schemas" => check_schemas(request),
         "config.read" => Ok(config_response(
             config_bridge::read_snapshot(Path::new(field(request, "path")?), MAX_CONFIG_BYTES)?,

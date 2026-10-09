@@ -1,0 +1,6 @@
+set(plugin_name myime-storage)
+add_library(myime-storage-objs OBJECT rime_storage.cpp)
+target_compile_definitions(myime-storage-objs PRIVATE RIME_EXPORTS NOMINMAX UNICODE _UNICODE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000000)
+set(plugin_objs $<TARGET_OBJECTS:myime-storage-objs> PARENT_SCOPE)
+set(plugin_deps winsqlite3 bcrypt PARENT_SCOPE)
+set(plugin_modules myime_storage PARENT_SCOPE)

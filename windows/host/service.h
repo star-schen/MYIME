@@ -10,6 +10,8 @@
 #include "candidate_element.h"
 #include "mode_indicator.h"
 #include "settings_action.h"
+#include "focus_session.h"
+#include "application_group.h"
 using Microsoft::WRL::ComPtr;
 class WindowsInputAdapter final : public ITfTextInputProcessorEx, public ITfKeyEventSink,
     public ITfTextEditSink, public ITfThreadMgrEventSink, public ITfTextLayoutSink, public ITfFunctionProvider {
@@ -30,7 +32,7 @@ public:
     STDMETHODIMP OnPreservedKey(ITfContext*,REFGUID,BOOL* eaten) override { if (!eaten) return E_POINTER; *eaten=FALSE; return S_OK; }
     STDMETHODIMP OnEndEdit(ITfContext*,TfEditCookie,ITfEditRecord*) override;
     STDMETHODIMP OnInitDocumentMgr(ITfDocumentMgr*) override { return S_OK; }
-    STDMETHODIMP OnUninitDocumentMgr(ITfDocumentMgr*) override { return S_OK; }
+    STDMETHODIMP OnUninitDocumentMgr(ITfDocumentMgr*) override;
     STDMETHODIMP OnSetFocus(ITfDocumentMgr*,ITfDocumentMgr*) override;
     STDMETHODIMP OnPushContext(ITfContext*) override;
     STDMETHODIMP OnPopContext(ITfContext*) override;
@@ -39,6 +41,7 @@ public:
     STDMETHODIMP GetDescription(BSTR*) override;
     STDMETHODIMP GetFunction(REFGUID,REFIID,IUnknown**) override;
     HRESULT edit(TfEditCookie,ITfContext*,int action,int key,int mask,unsigned long long generation,BOOL* eaten);
+    HRESULT detach_context(TfEditCookie,const std::shared_ptr<ContextSession>&,unsigned long long serial);
 private:
     long refs_=1;
     ComPtr<ITfThreadMgr> manager_;
@@ -47,12 +50,25 @@ private:
     ComPtr<ITfCompositionSink> composition_observer_;
     TfClientId client_=TF_CLIENTID_NULL;
     DWORD manager_cookie_=TF_INVALID_COOKIE,layout_cookie_=TF_INVALID_COOKIE;
-    DWORD edit_cookie_=TF_INVALID_COOKIE;
     Engine engine_;
+    std::vector<std::shared_ptr<ContextSession>> sessions_;
+    std::shared_ptr<ContextSession> current_session_;
+    static HRESULT context_changed(void*,ContextSession*,TfEditCookie,ITfEditRecord*);
+    void suspend_context();
+    void discard_context(const std::shared_ptr<ContextSession>&);
+    void trim_sessions();
+    HRESULT restore_context(TfEditCookie);
+    HWND settings_watch_=nullptr;
+    std::filesystem::path module_directory_;
+    std::filesystem::path presentation_generation_;
+    ULONGLONG config_stamp_=0,theme_stamp_=0,language_stamp_=0;
+    static LRESULT CALLBACK settings_message(HWND,UINT,WPARAM,LPARAM);
+    void refresh_settings(bool);
+    void start_settings_watch();
     ThemeCatalog themes_;
     CandidateTheme candidate_theme_;
     std::wstring theme_id_;
-    void update_theme();
+    void update_theme(bool force=false);
     CandidateWindow window_;
     std::array<bool,256> forwarded_{};
     bool faulted_=false;
@@ -63,6 +79,10 @@ private:
     bool mode_added_=false;
     SettingsAction settings_;
     static HRESULT open_settings(void*);
+    static HRESULT select_group(void*,const std::wstring&);
+    void update_learning_menu();
+    void sync_learning_group(bool force=false);
+    ULONGLONG group_revision_=~ULONGLONG{0};
     void update_mode();
     static HWND mode_owner(void*);
     ComPtr<ITfUIElementMgr> ui_manager_;
@@ -82,7 +102,6 @@ private:
     unsigned long long generation_=0;
     bool eligible(ITfContext*,WPARAM,LPARAM);
     void switch_context(ITfContext*);
-    void reset();
     HRESULT request(ITfContext*,int,int,int,bool,BOOL*);
     HRESULT apply(TfEditCookie,ITfContext*);
     HRESULT position(TfEditCookie,ITfContext*);

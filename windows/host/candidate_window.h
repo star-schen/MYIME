@@ -22,7 +22,7 @@ public:
     CandidateWindow(const CandidateWindow&)=delete;
     CandidateWindow& operator=(const CandidateWindow&)=delete;
     ~CandidateWindow() { destroy(); }
-    bool create(HINSTANCE,void* owner,Action,const CandidateTheme&);
+    bool create(HINSTANCE,void* owner,Action,const CandidateTheme&,HWND window_owner=nullptr);
     void destroy();
     void set_theme(const CandidateTheme&);
     bool created() const noexcept { return window_!=nullptr; }
@@ -30,12 +30,15 @@ public:
     HWND shadow_hwnd() const noexcept { return shadow_; }
     HWND parent() const noexcept { return window_?reinterpret_cast<HWND>(GetWindowLongPtrW(window_,GWLP_HWNDPARENT)):nullptr; }
     BOOL visible() const noexcept { return window_ && IsWindowVisible(window_); }
-    void set_parent(HWND);
+    bool set_parent(HWND);
     void hide();
     void refresh(CandidatePresentation view) { if (visible()) present(std::move(view),last_caret_); }
     void present(CandidatePresentation,RECT caret);
     int hit_test(POINT) const noexcept; // local index; -1/-2 pages; -4 none.
     RECT candidate_bounds(size_t) const noexcept;
+    // Offscreen presentation: no HWND, TSF session, activation or topmost popup.
+    // Caller owns the returned DIB and deletes it with DeleteObject.
+    HBITMAP render_image(const CandidateTheme&,CandidatePresentation,int max_width,int max_height,UINT dpi,SIZE*);
 private:
     static LRESULT CALLBACK procedure(HWND,UINT,WPARAM,LPARAM);
     HWND window_=nullptr,shadow_=nullptr;
@@ -50,6 +53,7 @@ private:
     CandidateTheme theme_;
     CandidatePresentation snapshot_;
     RECT last_caret_{},header_{},footer_{},previous_button_{},next_button_{},viewport_{};
+    RECT input_card_{},candidate_card_{};
     std::vector<RECT> cells_;
     UINT dpi_=96;
     int width_=1,height_=1,text_height_=24,content_height_=0,scroll_=0;

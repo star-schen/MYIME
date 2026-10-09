@@ -4,8 +4,21 @@
 #include <new>
 #include <cstring>
 #include <atomic>
+#include <windows.h>
+#include <string>
+#include <rime_storage.h>
 extern "C" {
-int rb_initialize(const char* shared, const char* user, int first) {
+int rb_initialize(const char* shared, const char* user, const char* learning, int optional_learning, int first) {
+    if(!learning || (!*learning && !optional_learning))return 0;
+    const int count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,learning,-1,nullptr,0);
+    if(count<=0)return 0;
+    std::wstring directory(static_cast<size_t>(count),L'\0');
+    if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,learning,-1,directory.data(),count))return 0;
+    bool learning_ready=*learning!=0;
+    if(!MyimeStorageConfigure(directory.c_str())) {
+        if(!optional_learning || !MyimeStorageConfigure(L""))return 0;
+        learning_ready=false;
+    }
     auto api = rime_get_api();
     if (!RIME_API_AVAILABLE(api, select_candidate_on_current_page)) return 0;
     RIME_STRUCT(RimeTraits, traits);
@@ -18,8 +31,12 @@ int rb_initialize(const char* shared, const char* user, int first) {
     traits.min_log_level = 2;
     if (first) api->setup(&traits);
     api->initialize(&traits);
-    return 1;
+    // 2 means usable Rime with shared learning explicitly disabled.
+    return learning_ready?1:2;
 }
+void rb_begin_event(uintptr_t id,const char* application,const char* group,int habits) { MyimeStorageSession(id,application,group,habits); }
+int rb_end_event(int success) { return MyimeStorageFinishEvent(success)?0:(MyimeStorageStatus()?MyimeStorageStatus():1); }
+int rb_maintain_learning(int operation,const wchar_t* argument) { return MyimeStorageMaintain(operation,argument); }
 void rb_finalize() { rime_get_api()->finalize(); }
 int rb_deploy() {
     auto api = rime_get_api();
@@ -38,6 +55,7 @@ uintptr_t rb_create() { return rime_get_api()->create_session(); }
 void rb_destroy(uintptr_t id) { rime_get_api()->destroy_session(id); }
 int rb_key(uintptr_t id, int key, int mask) { return rime_get_api()->process_key(id, key, mask); }
 int rb_select(uintptr_t id, size_t index) { return rime_get_api()->select_candidate_on_current_page(id, index); }
+int rb_commit_current(uintptr_t id) { return rime_get_api()->commit_composition(id); }
 int rb_schema(uintptr_t id, const char* schema) { return rime_get_api()->select_schema(id, schema); }
 RimeConfig* rb_schema_config(const char* schema) {
     auto p = new(std::nothrow) RimeConfig{};

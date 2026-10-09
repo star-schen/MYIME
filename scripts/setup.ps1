@@ -1,11 +1,14 @@
-﻿param([ValidateSet('Menu','Install','Uninstall')][string]$Action = 'Menu')
+﻿param([ValidateSet('Menu','Install','Uninstall')][string]$Action = 'Menu',
+      [ValidatePattern('^S-1-[0-9-]+$')][string]$OwnerSid = ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value),
+      [string]$UserDataRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MYIME'))
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location -LiteralPath $root
 
 function Invoke-AdminAction([string]$SelectedAction) {
     $powershell = "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe"
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Action ' + $SelectedAction
+    if ($UserDataRoot.Contains('"') -or !$UserDataRoot -or ![IO.Path]::IsPathRooted($UserDataRoot)) { throw 'Invalid origin user data directory.' }
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Action ' + $SelectedAction + ' -OwnerSid ' + $OwnerSid + ' -UserDataRoot "' + $UserDataRoot.TrimEnd('\') + '"'
     # This is an explicitly interactive installer: show progress in its window.
     $worker = Start-Process -FilePath $powershell -Verb RunAs -ArgumentList $arguments -Wait -PassThru
     if ($worker.ExitCode) { throw '安装操作未完成，请查看管理员窗口提示和安装日志。' }
@@ -19,7 +22,7 @@ try {
     Start-Transcript -LiteralPath $log | Out-Null
     $transcript = $true
     if ($Action -eq 'Install') {
-        & "$PSScriptRoot/install.ps1" -Configuration Release
+        & "$PSScriptRoot/install.ps1" -Configuration Release -OwnerSid $OwnerSid -UserDataRoot $UserDataRoot
         Write-Host '安装完成。请保存工作后注销 Windows，再重新登录使用新版。' -ForegroundColor Green
     } elseif ($Action -eq 'Uninstall') {
         & "$PSScriptRoot/uninstall.ps1"

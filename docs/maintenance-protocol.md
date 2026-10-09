@@ -153,3 +153,20 @@ cargo test -p myime-tool --locked --target-dir target/maintenance-tests
 ```
 
 测试创建新的临时 fixture 目录；不会读写真实 `%LOCALAPPDATA%/MYIME/config.toml` 或用户词库。覆盖外部修改 hash/mtime、备份、进程锁释放、未知值/注释保留、继承清除、inline profiles、协议大小/版本、坏文件原文恢复和 YAML 白名单。真实 GUI 接入和数据部署另有独立测试。
+# 2026-10-05 附加操作
+
+以下为本版新增源码协议；本轮未运行协议测试。原有版本 1 JSON 请求、ok/error、大小上限与修订冲突规则继续适用。
+
+| command | 输入 / 结果 |
+|---|---|
+| theme.catalog | user_root / installed_root 为绝对目录；返回有界 id/name 列表和读取警告 |
+| theme.describe | text 为主题草稿；返回已校验字段、分类、类型与枚举选项 |
+| theme.edit | text + changes（字段路径到值）；返回保留注释/未知项的已校验草稿，不写文件 |
+| config.apply_theme | path、expected、theme；更新 Default 主题，清除 Windows 主题覆盖，保留 AppProfile |
+| config.presentation | path；返回仅含已知产品字段和已校验学习设置的 TOML 投影，不含工具/API 凭据 |
+| learning.update | path、expected、learning；更新 habits_enabled/ai_enabled/groups/applications，保留其他未知字段 |
+
+learning.groups 必须用小写 JSON 字段 id/name；applications 使用 path/name/group。日常和工作为默认组，最大组数 32、映射 512，完整 EXE 路径匹配。ui 只投影 theme，input 只投影 focus/caps_lock。新增 Native 学习维护通过 myime-learning-tool 的独立入口调用 Core C ABI，不给不链接 Rime 的 JSON 工具增加输入依赖。
+
+---
+

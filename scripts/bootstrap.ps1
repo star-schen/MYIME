@@ -10,10 +10,6 @@ function Get-VerifiedArchive($item, $path) {
 Get-VerifiedArchive $lock.cmake '.tools/cmake.zip'
 $cmake = "$root/.tools/cmake-$($lock.cmake.version)-windows-x86_64/bin/cmake.exe"
 if (!(Test-Path $cmake)) { Expand-Archive .tools/cmake.zip -DestinationPath .tools -Force }
-Get-VerifiedArchive $lock.librime '.deps/rime.7z'
-New-Item -ItemType Directory -Force .deps/librime | Out-Null
-Push-Location .deps/librime
-try { & $cmake -E tar xf ../rime.7z; if ($LASTEXITCODE) { throw 'librime archive extraction failed' } } finally { Pop-Location }
 foreach ($entry in $lock.data) {
     $path = Join-Path $root ".deps/$($entry.repo)"
     if (!(Test-Path "$path/.git")) {
@@ -25,4 +21,4 @@ foreach ($entry in $lock.data) {
     & git -C $path checkout --detach $entry.commit
     if ($LASTEXITCODE) { throw 'Pinned data checkout failed' }
 }
-Write-Host 'Dependencies prepared. Run scripts/build.ps1, then scripts/prepare-data.ps1.'
+Write-Host 'Data and CMake prepared. build.ps1 will prepare the pinned source librime SDK, then build MYIME. No tests are run by this script.'

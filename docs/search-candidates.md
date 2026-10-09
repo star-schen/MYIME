@@ -1,4 +1,25 @@
-# Windows 搜索候选诊断（2026-09-30）
+# Windows 搜索候选诊断
+
+## 2026-10-09 共享路径与初始化源码修复（未构建、安装或测试）
+
+用户授权继续实施。安装器现在发布受保护的共享存储基目录，Host 保留有效用户 SID 和逐阶段原生错误信息；共享学习及共享设置不可用时保留基础输入，并提供简繁中文状态提示。Core、librime 包装器和对应 ABI 同步修改；查询、提交及正常回滚也纳入不可用状态处理。
+
+本轮只改源码并准备同步仓库。未编译、安装、启动新采集或复现，不能宣称开始菜单已经修复。旧日志仍不足以确定唯一失败 API，损坏的工作区或未部署字典仍需按实际日志修复。配套构建要求和验证边界见 [源码修复说明](diagnostics/windows-search-2026-10-08/source-fix-2026-10-09.md)。
+
+## 2026-10-08 已构建安装后的搜索初始化失败（历史诊断）
+
+用户已重启并手动复现：第一次失效，第二次在搜索框内重新选择 MYIME 后实际仍是微软拼音。最新日志明确捕获 SearchApp PID 24876 的 MYIME 两次初始化失败，hr=0x80004005；Core / Rime DLL 加载和用户目录租用成功，失败位于共用工作区路径 / 全局学习目录身份解析范围，发生在创建 Rime 会话和候选 UI 之前。当前通用异常日志丢失具体原因，尚未确认精确失败点，不能把它认定为旧候选遮挡问题。
+
+构建安装已完成，用户真实搜索复现未通过；本机日志采集已停止，用户要求不启动新测试、改在其他机器继续。完整结论、版本信息、代码入口、原始跟踪和解码记录见 [跨机器交接](diagnostics/windows-search-2026-10-08/README.md)。下文保留历史状态，旧的“尚未构建安装”不代表当前状态。
+## 2026-10-05 源码处理与验收状态
+
+2026-10-04 用户两轮手动复现确认输入/空格提交正常，但候选不可见。详细日志来自 SearchApp：pbShow=1、caret 非空且未裁剪、期望窗口 owner=0x303A6，而候选窗口读回 owner=0；另有主题加载 os error 5。输入结束后的 cloaked=2 快照不能作为输入期间被 Shell 隐藏的证明。
+
+本版源码将有效顶层 owner 传入 CreateWindowExW，后续设置核对 LastError 与 GW_OWNER；首帧同步绘制。主题根据已打开文件的最终 NT 路径验证包含关系，设置将主题与必要配置发布到受限应用可读的 MYIME 展示目录。相关方法符合微软 [IME owned-window 要求](https://learn.microsoft.com/en-us/windows/apps/develop/input/input-method-editor-requirements#owned-window)；它们不构成已修好的界面证据。
+
+**这版没有构建、安装或复现。** 用户需用最新源码构建/打包并安装，首次共享数据组生效后注销再登录，再确认候选实际可见、位置、皮肤与提交。请勿用旧 out 包代替本版；完整步骤见 [feature-acceptance.md](feature-acceptance.md)。只有真实验收或新日志才能决定是否还需要处理遮挡、绘制或 Shell 行为。
+
+## 2026-09-30 历史记录与通用采集方法
 
 状态：诊断版 **Release 编译及自动 TSF 回归已通过，待搜索目标进程实际日志定位**。独立 TSF probe 启用诊断，已记录 pbShow=1/0 与 visible=1/0、context/owner/caret、End 和 suppressed；不等于 Windows 搜索已修复。本轮未安装、未操作真实搜索、未注销或启动游戏。用户反馈此前版本搜索无候选栏，但 nihao + 空格可提交“你好”；闪烁已消失、图标正常。
 
@@ -27,7 +48,7 @@ visibility reason 包括 host-display-not-requested、Show-false、no-owner-hwnd
 
 ## 用户最小采集步骤
 
-1. 本轮已完成构建/回归及打包，不必重复编译。在当前仓库双击 Install-MYIME.cmd，选 2 安装 out/MYIME-Release；若使用另一份仓库或包需确认提交版本。不要只复制 DLL；采用独立版本目录。记下版本目录和提交号，避免目标仍加载旧 DLL。
+1. 先确认源码提交和配套构建产物，构建/打包成功后再安装。新版可在 Install-MYIME.cmd 选 1 准备；选 2 仅适用于已确认最新的完整 out/MYIME-Release 包。不要只复制 DLL；采用独立版本目录。记下目录和提交号，首次新版安装后注销再登录，避免旧 DLL 与未更新的数据组令牌。
 2. Windows 搜索/开始菜单可能已经运行，单独在新 PowerShell 设置 `$env:MYIME_DIAGNOSTICS='1'` 不会让已有系统进程继承。先记下用户环境变量原值，再由用户自行设置下列变量；如需让系统进程继承，由用户自行注销并重新登录。本轮实施不会自动注销、强杀系统进程或修改其他输入法。
 
    ```powershell
@@ -47,3 +68,4 @@ visibility reason 包括 host-display-not-requested、Show-false、no-owner-hwnd
 ## 定位时需要回答
 
 先看 pbShow/Show 与 visible，再看 context/owner 和 caret HRESULT。如果应用要求自绘，则继续定位应用绘制链路；如果允许 Host 显示，则用明确的隐藏原因/创建结果定位。若日志显示 Host visible=true，仍需用户提供是否遮挡、焦点所属及多屏信息，不能仅凭 IsWindowVisible 宣称搜索正常。没有实际日志前保持“诊断已加入，搜索修复待定位”。
+

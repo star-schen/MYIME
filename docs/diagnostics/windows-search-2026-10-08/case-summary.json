@@ -1,0 +1,54 @@
+{
+  "Date": "2026-10-08",
+  "TimeZone": "UTC+08:00",
+  "SourceBaseline": "3ff75916ddb7c5fcde31793ce9d0b5483dc867cd",
+  "InstalledVersion": "20261008-152106-b6123f93",
+  "UserResults": [
+    "第一次：失效",
+    "第二次：搜索框内重新选择 MYIME 后仍是微软拼音"
+  ],
+  "SearchPid": 24876,
+  "SearchThread": 24492,
+  "MyimeClsid": "{9CA315A1-16D5-4B2E-9368-978D7E9C2215}",
+  "PinyinClsid": "{81D4E9C9-1D3B-41BC-9E6C-4B40BF79E35E}",
+  "Events": [
+    {
+      "Time": "17:17:49.361",
+      "Process": "ChatGPT",
+      "Stage": "MYIME TSF activated",
+      "Result": "S_OK"
+    },
+    {
+      "Time": "17:17:53.323",
+      "Process": "SearchApp",
+      "Stage": "ActivateTIP MYIME"
+    },
+    {
+      "Time": "17:17:53.326",
+      "Process": "SearchApp",
+      "Stage": "Core and Rime DLL loaded"
+    },
+    {
+      "Time": "17:17:53.328",
+      "Process": "SearchApp",
+      "Stage": "Rime user directory leased, then initialization failed",
+      "Result": "0x80004005"
+    },
+    {
+      "Time": "17:18:07.515",
+      "Process": "SearchApp",
+      "Stage": "ActivateTIP Microsoft Pinyin"
+    },
+    {
+      "Time": "17:18:11.844",
+      "Process": "SearchApp",
+      "Stage": "Second MYIME initialization failed after directory lease",
+      "Result": "0x80004005"
+    }
+  ],
+  "Confirmed": "Search AppContainer initialization failure before Rime session creation and candidate UI",
+  "Unresolved": "Shared workspace resolution, path conversion, or SharedProfile identity/ProgramData resolution; exact exception discarded by generic catch",
+  "CapturesStopped": true,
+  "NewTestsProhibited": true,
+  "RawLogsPublished": false
+}

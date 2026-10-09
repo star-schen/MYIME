@@ -48,6 +48,11 @@ pub trait InputProvider {
     fn select(&mut self, page_index: usize) -> Result<(), String>;
     fn clear(&mut self) -> Result<(), String>;
     fn ack_commit(&mut self) -> Result<(), String>;
+    /// Explicit product policy commit; providers retain the resulting text until acknowledgement.
+    fn commit_current(&mut self) -> Result<(), String> {
+        self.process(KeyEvent { keysym: 0xff0d, modifiers: 0 }).map(|_| ()).map_err(|e| e.message)
+    }
+    fn learning_context(&mut self, _application: &str, _group: &str, _habits: bool) -> Result<(), String> { Ok(()) }
 }
 /// Creates a configured, idle provider with its initial state already read.
 /// Failures must release provisional resources without disturbing live providers.

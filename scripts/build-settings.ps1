@@ -6,11 +6,14 @@ if (!(Test-Path -LiteralPath $compiler)) { throw '.NET Framework 4.8 x64 compile
 $source = Join-Path $root 'windows\settings'
 $output = Join-Path $root "build\$Configuration"
 New-Item -ItemType Directory -Force -Path $output | Out-Null
-$arguments = @('/nologo', '/target:winexe', '/platform:x64', '/codepage:65001', '/warn:4', '/warnaserror', '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll', "/win32manifest:$source\settings.manifest", "/out:$output\myime-settings.exe")
+$arguments = @('/nologo', '/target:winexe', '/platform:x64', '/codepage:65001', '/warn:4', '/warnaserror', '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll', '/reference:System.Security.dll', "/win32manifest:$source\settings.manifest", "/out:$output\myime-settings.exe")
 $arguments += "/win32icon:$root\windows\host\assets\brand.ico"
+foreach ($language in @('zh-Hans','zh-Hant')) { $arguments += "/resource:$source\languages\$language.json,MYIME.languages.$language.json" }
 if ($Configuration -eq 'Release') { $arguments += '/optimize+' } else { $arguments += '/debug:full' }
 $arguments += @(Get-ChildItem -LiteralPath $source -Filter '*.cs' | Sort-Object Name | ForEach-Object { $_.FullName })
 & $compiler @arguments
 if ($LASTEXITCODE) { throw 'C# settings build failed' }
 Copy-Item -LiteralPath (Join-Path $source 'myime-settings.exe.config') -Destination $output -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $output 'languages') | Out-Null
+Copy-Item -LiteralPath (Join-Path $source 'languages\zh-Hans.json'), (Join-Path $source 'languages\zh-Hant.json') -Destination (Join-Path $output 'languages') -Force
 Write-Host "C# settings: $output\myime-settings.exe"

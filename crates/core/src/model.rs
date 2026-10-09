@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Candidate {
     pub text: String,
     pub comment: String,
     pub label: String,
     pub index: usize,
 }
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct InputState {
     pub preedit: String,
     /// UTF-8 byte offset, converted to UTF-16 only by the Windows host.

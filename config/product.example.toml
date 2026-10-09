@@ -1,5 +1,6 @@
-# Copy to %LOCALAPPDATA%/MYIME/config.toml. Restart the target app to reload.
-# Implemented settings: enabled, schema, options.<Rime option>, ui.theme.
+# First use only: copy to %LOCALAPPDATA%/MYIME/config.toml.
+# Save in Settings to publish changes to running applications.
+# Newly deployed Rime data still requires restarting the target application.
 [default]
 enabled = true
 schema = "pinyin_simp"
@@ -9,8 +10,27 @@ ascii_mode = false
 [default.ui]
 theme = "default" # default / light / dark / ribbon, or a user theme package id.
 
+[default.input]
+focus = "retain" # retain / cancel / commit, always tied to the original context.
+caps_lock = "compose_uppercase" # compose_uppercase / commit_then_direct.
+
 [platform.windows]
 # Unset fields inherit the defaults.
+
+[learning]
+habits_enabled = false # Global learning by default; true selects the group namespace.
+ai_enabled = false # Manual suggestions only, never an automatic input service.
+
+[[learning.groups]]
+id = "daily"
+name = "日常"
+
+[[learning.groups]]
+id = "work"
+name = "工作"
+
+# Configure exact absolute EXE paths in Settings / Learning and grouping.
+# Unmapped applications use daily. No EXE categories are guessed.
 
 [[profiles]]
 executable = "example-game.exe"

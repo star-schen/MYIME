@@ -68,7 +68,7 @@ int main() {
         passed &= check(catalog.resolve(L"dark").style.background==installed.style.background,"theme removal restores installed package");
         passed &= check(catalog.resolve(L"not-installed").id==L"default","missing package fallback");
         MyimeTheme* handle=nullptr; const auto user=utf8((fixture.root/L"themes").wstring()),shared=utf8((directory/L"themes").wstring());
-        passed &= check(myime_theme_abi_version()==1 && myime_theme_resolve("dark",user.c_str(),shared.c_str(),&handle)==0,"presentation ABI");
+        passed &= check(myime_theme_abi_version()==2 && myime_theme_resolve("dark",user.c_str(),shared.c_str(),&handle)==0,"presentation ABI");
         if (handle) {
             MyimeThemeView view{};
             passed &= check(myime_theme_view(handle,sizeof(view)-1,&view)==-1,"ABI output size guard");

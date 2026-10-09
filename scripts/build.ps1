@@ -2,6 +2,8 @@ param([ValidateSet('Debug','Release')][string]$Configuration = 'Debug')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
+if (!(Test-Path -LiteralPath (Join-Path $root 'themes/default/theme.toml'))) { throw 'Source tree is incomplete: themes/default/theme.toml is required by include_str!. Restore the complete repository before building.' }
+if (!(Get-Command cargo -ErrorAction SilentlyContinue) -and !(Test-Path -LiteralPath "$env:USERPROFILE/.cargo/bin/cargo.exe")) { throw 'Rust cargo is missing. Install the MSVC Rust toolchain before building.' }
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (!(Test-Path $vswhere)) { throw 'Install Visual Studio 2022 Desktop development with C++ and Windows SDK.' }
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -18,6 +20,8 @@ if ($cmake) { $cmake = $cmake.Source } else {
 }
 if (!(Test-Path $cmake)) { throw 'CMake is missing. Run scripts/bootstrap.ps1.' }
 $profile = if ($Configuration -eq 'Release') { 'release' } else { 'debug' }
+& "$PSScriptRoot/build-rime.ps1" -CMake $cmake
+$env:RIME_ROOT = Join-Path $root '.deps/rime-shared/dist'
 $cargoArgs = @('build','-p','myime-core','--locked')
 if ($Configuration -eq 'Release') { $cargoArgs += '--release' }
 & cargo @cargoArgs
